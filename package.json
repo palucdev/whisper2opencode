@@ -3,35 +3,27 @@
   "version": "0.1.0",
   "description": "OpenCode v1 plugin for audio transcription using whisper.cpp JS bindings",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc && bun run copy-markdowns",
+    "build": "rm -rf dist && bun run type-check && bun run test && bun run copy-markdowns",
     "copy-markdowns": "bun run ./scripts/copy-markdowns.js",
     "local-install": "bun run build && opencode plugin \"$(pwd)\" --global --force",
     "prepack": "bun run build",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test test/transcribe.test.js"
-  },
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.19.5",
-    "ffmpeg-static": "^5.3.0",
-    "gray-matter": "^4.0.3",
-    "whisper.cpp": "^1.0.3"
-  },
-  "devDependencies": {
-    "@types/node": "^26.6.6",
-    "typescript": "^5.8.2"
+    "prettify": "prettier --write .",
+    "test": "bun test src",
+    "type-check": "bun tsc"
   },
   "keywords": [
     "opencode",
@@ -43,5 +35,33 @@
   "author": {
     "name": "Dawid Paluchowski",
     "email": "palucdev@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/palucdev/whisper2opencode.git"
+  },
+  "homepage": "https://github.com/palucdev/whisper2opencode#readme",
+  "bugs": {
+    "url": "https://github.com/palucdev/whisper2opencode/issues"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.19.5",
+    "ffmpeg-static": "^5.3.0",
+    "gray-matter": "^4.0.3",
+    "whisper.cpp": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.13",
+    "@types/node": "^26.6.6",
+    "prettier": "^3.9.10",
+    "typescript": "^5.8.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.3.0"
   }
 }

@@ -1,11 +1,5 @@
 export type WhisperInstance = {
-  FS_createDataFile(
-    parent: string,
-    name: string,
-    data: Uint8Array,
-    canRead: boolean,
-    canWrite: boolean,
-  ): void;
+  FS_createDataFile(parent: string, name: string, data: Uint8Array, canRead: boolean, canWrite: boolean): void;
   init(pathModel: string): boolean;
   full_default(audio: Float32Array, lang: string, translate: boolean): number;
   free(): void;
@@ -14,10 +8,7 @@ export type WhisperInstance = {
   };
 };
 
-export type WhisperFactory = (moduleOverrides?: {
-  print?: (text: string) => void;
-  printErr?: (text: string) => void;
-}) => Promise<WhisperInstance>;
+export type WhisperFactory = (moduleOverrides?: { print?: (text: string) => void; printErr?: (text: string) => void }) => Promise<WhisperInstance>;
 
 export type TranscriptionSegment = {
   startMs: number;
@@ -30,13 +21,7 @@ export type TranscriptionMediaResult = {
   durationMs: number;
 };
 
-export type SupportedConvertFormat =
-  | "wav"
-  | "mp3"
-  | "ogg"
-  | "flac"
-  | "m4a"
-  | "pcmf32";
+export type SupportedConvertFormat = 'wav' | 'mp3' | 'ogg' | 'flac' | 'm4a' | 'pcmf32';
 
 export type TranscribeOptions = {
   filePath: string;
@@ -60,4 +45,3 @@ export type SaveTranscriptionOptions = {
   content: string;
   directory?: string;
 };
-

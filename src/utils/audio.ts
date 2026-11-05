@@ -1,33 +1,30 @@
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import { createRequire } from "node:module";
-import path from "node:path";
-import type {
-  ConvertAudioOptions,
-  SupportedConvertFormat,
-} from "../types/whisper-types.js";
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import type { ConvertAudioOptions, SupportedConvertFormat } from '../types/whisper-types.js';
 
 const require = createRequire(import.meta.url);
 
 export const SAMPLE_RATE = 16000;
 
 const VIDEO_EXTENSIONS = new Set([
-  ".mp4",
-  ".mkv",
-  ".mov",
-  ".avi",
-  ".webm",
-  ".flv",
-  ".m4v",
-  ".ts",
-  ".mts",
-  ".m2ts",
-  ".mpeg",
-  ".mpg",
-  ".3gp",
-  ".wmv",
-  ".ogv",
-  ".vob",
+  '.mp4',
+  '.mkv',
+  '.mov',
+  '.avi',
+  '.webm',
+  '.flv',
+  '.m4v',
+  '.ts',
+  '.mts',
+  '.m2ts',
+  '.mpeg',
+  '.mpg',
+  '.3gp',
+  '.wmv',
+  '.ogv',
+  '.vob',
 ]);
 
 export function isVideoFile(filePath: string): boolean {
@@ -35,26 +32,22 @@ export function isVideoFile(filePath: string): boolean {
 }
 
 export function getFileType(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase().replace(/^\./, "");
-  const category = isVideoFile(filePath) ? "video" : "audio";
+  const ext = path.extname(filePath).toLowerCase().replace(/^\./, '');
+  const category = isVideoFile(filePath) ? 'video' : 'audio';
   return ext ? `${category}/${ext}` : category;
 }
 
 export function resolveMediaFile(
   inputPath: string | undefined,
   baseDir: string,
-  argName: "filePath" | "inputPath",
+  argName: 'filePath' | 'inputPath',
 ): { resolvedPath: string; stat: fs.Stats } {
-  const label = argName === "filePath" ? "Audio/video file" : "Source media file";
+  const label = argName === 'filePath' ? 'Audio/video file' : 'Source media file';
   if (!inputPath?.trim()) {
-    throw new Error(
-      `Missing required '${argName}' argument. Hint: Provide a valid path to an audio or video file.`,
-    );
+    throw new Error(`Missing required '${argName}' argument. Hint: Provide a valid path to an audio or video file.`);
   }
 
-  const resolvedPath = path.isAbsolute(inputPath)
-    ? inputPath
-    : path.resolve(baseDir, inputPath);
+  const resolvedPath = path.isAbsolute(inputPath) ? inputPath : path.resolve(baseDir, inputPath);
 
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(
@@ -69,16 +62,14 @@ export function resolveMediaFile(
     );
   }
   if (stat.size === 0) {
-    throw new Error(
-      `${label} is empty (0 bytes): ${resolvedPath}. Hint: Check that the file was properly written or downloaded.`,
-    );
+    throw new Error(`${label} is empty (0 bytes): ${resolvedPath}. Hint: Check that the file was properly written or downloaded.`);
   }
 
   return { resolvedPath, stat };
 }
 
 function getFfmpegBinary(): string {
-  const ffmpegPath = require("ffmpeg-static") as string | null;
+  const ffmpegPath = require('ffmpeg-static') as string | null;
   if (!ffmpegPath) {
     throw new Error(
       "ffmpeg-static binary is not available for this platform. Hint: Convert the input file to raw 16kHz mono 32-bit float PCM (.pcmf32) externally and pass the .pcmf32 file to 'transcribe'.",
@@ -89,31 +80,19 @@ function getFfmpegBinary(): string {
 
 function formatFfmpegStderr(err: unknown): { raw: string; detail: string } {
   const raw =
-    err &&
-    typeof err === "object" &&
-    "stderr" in err &&
-    Buffer.isBuffer(err.stderr)
-      ? err.stderr.toString("utf8").trim()
+    err && typeof err === 'object' && 'stderr' in err && Buffer.isBuffer(err.stderr)
+      ? err.stderr.toString('utf8').trim()
       : err instanceof Error
         ? err.message
         : String(err);
-  const detail =
-    raw
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .slice(-3)
-      .join(" | ") || "unknown ffmpeg error";
+  const detail = raw.split(/\r?\n/).filter(Boolean).slice(-3).join(' | ') || 'unknown ffmpeg error';
   return { raw, detail };
 }
 
 export function decodeAudioToFloat32(mediaPath: string): Float32Array {
-  if (mediaPath.endsWith(".pcmf32")) {
+  if (mediaPath.endsWith('.pcmf32')) {
     const raw = fs.readFileSync(mediaPath);
-    const samples = new Float32Array(
-      raw.buffer,
-      raw.byteOffset,
-      Math.floor(raw.byteLength / 4),
-    );
+    const samples = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
     if (samples.length === 0) {
       throw new Error(
         `Decoded audio from "${mediaPath}" contains 0 samples. Hint: The .pcmf32 file is empty or smaller than 4 bytes. Regenerate the file as 16kHz mono 32-bit float PCM or pass the original audio/video file.`,
@@ -128,34 +107,32 @@ export function decodeAudioToFloat32(mediaPath: string): Float32Array {
     pcmBuffer = execFileSync(
       ffmpegPath,
       [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-i',
         mediaPath,
-        "-vn",
-        "-map",
-        "0:a:0",
-        "-ar",
+        '-vn',
+        '-map',
+        '0:a:0',
+        '-ar',
         String(SAMPLE_RATE),
-        "-ac",
-        "1",
-        "-f",
-        "f32le",
-        "-acodec",
-        "pcm_f32le",
-        "pipe:1",
+        '-ac',
+        '1',
+        '-f',
+        'f32le',
+        '-acodec',
+        'pcm_f32le',
+        'pipe:1',
       ],
       {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 256 * 1024 * 1024,
       },
     );
   } catch (err) {
     const { raw, detail } = formatFfmpegStderr(err);
-    const action = isVideoFile(mediaPath)
-      ? `Failed to isolate audio from video "${mediaPath}"`
-      : `Failed to decode audio from "${mediaPath}"`;
+    const action = isVideoFile(mediaPath) ? `Failed to isolate audio from video "${mediaPath}"` : `Failed to decode audio from "${mediaPath}"`;
 
     if (/does not contain any stream|matches no streams/i.test(raw)) {
       throw new Error(
@@ -163,11 +140,7 @@ export function decodeAudioToFloat32(mediaPath: string): Float32Array {
       );
     }
 
-    if (
-      /Invalid data found when processing input|Format .* detected only with low score|moov atom not found/i.test(
-        raw,
-      )
-    ) {
+    if (/Invalid data found when processing input|Format .* detected only with low score|moov atom not found/i.test(raw)) {
       throw new Error(
         `${action}: invalid or corrupted media format (${detail}). Hint: Verify that the file is a valid audio/video recording or convert it to a 16kHz mono .wav file first.`,
       );
@@ -178,11 +151,7 @@ export function decodeAudioToFloat32(mediaPath: string): Float32Array {
     );
   }
 
-  const samples = new Float32Array(
-    pcmBuffer.buffer,
-    pcmBuffer.byteOffset,
-    Math.floor(pcmBuffer.byteLength / 4),
-  );
+  const samples = new Float32Array(pcmBuffer.buffer, pcmBuffer.byteOffset, Math.floor(pcmBuffer.byteLength / 4));
   if (samples.length === 0) {
     throw new Error(
       `Decoded audio from "${mediaPath}" contains 0 samples. Hint: The audio stream is empty or has zero duration. Check the source file or convert it to a valid 16kHz mono .wav file.`,
@@ -193,29 +162,21 @@ export function decodeAudioToFloat32(mediaPath: string): Float32Array {
 
 export function convertAudioFile(options: ConvertAudioOptions): string {
   const baseDir = options.directory ?? process.cwd();
-  const { resolvedPath: resolvedInputPath } = resolveMediaFile(
-    options.inputPath,
-    baseDir,
-    "inputPath",
-  );
+  const { resolvedPath: resolvedInputPath } = resolveMediaFile(options.inputPath, baseDir, 'inputPath');
 
-  const targetFormat: SupportedConvertFormat = options.format ?? "wav";
+  const targetFormat: SupportedConvertFormat = options.format ?? 'wav';
   const sampleRate = options.sampleRate ?? SAMPLE_RATE;
   const channels = options.channels ?? 1;
   const overwrite = options.overwrite ?? true;
 
   let resolvedOutputPath: string;
   if (options.outputPath?.trim()) {
-    resolvedOutputPath = path.isAbsolute(options.outputPath)
-      ? options.outputPath
-      : path.resolve(baseDir, options.outputPath);
+    resolvedOutputPath = path.isAbsolute(options.outputPath) ? options.outputPath : path.resolve(baseDir, options.outputPath);
   } else {
     const parsed = path.parse(resolvedInputPath);
     const candidate = path.join(parsed.dir, `${parsed.name}.${targetFormat}`);
     resolvedOutputPath =
-      path.resolve(candidate) === path.resolve(resolvedInputPath)
-        ? path.join(parsed.dir, `${parsed.name}.converted.${targetFormat}`)
-        : candidate;
+      path.resolve(candidate) === path.resolve(resolvedInputPath) ? path.join(parsed.dir, `${parsed.name}.converted.${targetFormat}`) : candidate;
   }
 
   if (path.resolve(resolvedOutputPath) === path.resolve(resolvedInputPath)) {
@@ -225,39 +186,37 @@ export function convertAudioFile(options: ConvertAudioOptions): string {
   }
 
   if (!overwrite && fs.existsSync(resolvedOutputPath)) {
-    throw new Error(
-      `Output file already exists: ${resolvedOutputPath}. Hint: Set 'overwrite: true' or choose a different 'outputPath'.`,
-    );
+    throw new Error(`Output file already exists: ${resolvedOutputPath}. Hint: Set 'overwrite: true' or choose a different 'outputPath'.`);
   }
 
   fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
 
   const ffmpegPath = getFfmpegBinary();
   const ffmpegArgs = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    overwrite ? "-y" : "-n",
-    "-i",
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    overwrite ? '-y' : '-n',
+    '-i',
     resolvedInputPath,
-    "-vn",
-    "-ar",
+    '-vn',
+    '-ar',
     String(sampleRate),
-    "-ac",
+    '-ac',
     String(channels),
   ];
 
-  if (targetFormat === "pcmf32") {
-    ffmpegArgs.push("-f", "f32le", "-acodec", "pcm_f32le");
-  } else if (targetFormat === "wav") {
-    ffmpegArgs.push("-c:a", "pcm_s16le");
+  if (targetFormat === 'pcmf32') {
+    ffmpegArgs.push('-f', 'f32le', '-acodec', 'pcm_f32le');
+  } else if (targetFormat === 'wav') {
+    ffmpegArgs.push('-c:a', 'pcm_s16le');
   }
 
   ffmpegArgs.push(resolvedOutputPath);
 
   try {
     execFileSync(ffmpegPath, ffmpegArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
     const { raw, detail } = formatFfmpegStderr(err);

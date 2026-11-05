@@ -2,4 +2,13 @@
 
 export interface OpenCodeConfig {
   agent: any;
+  command: Record<string, OpenCodeCommand>;
+}
+
+export interface OpenCodeCommand {
+  template: string;
+  description?: string;
+  agent?: string;
+  model?: string;
+  subtask?: boolean;
 }
