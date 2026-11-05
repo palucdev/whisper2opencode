@@ -66,7 +66,21 @@ type TimestampedWord = {
   endMs: number;
 };
 
-const transcriptionCache = new Map<string, TranscriptionSegment[]>();
+type TranscriptionMediaResult = {
+  segments: TranscriptionSegment[];
+  durationMs: number;
+};
+
+type FileMetadata = {
+  filename: string;
+  fileType: string;
+  durationMs: number;
+  durationTimestamp: string;
+  durationSeconds: string;
+};
+
+const SAMPLE_RATE = 16000;
+const transcriptionCache = new Map<string, TranscriptionMediaResult>();
 
 function parseTimestampToMs(timestamp: string): number {
   const match = /^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(timestamp.trim());
@@ -328,12 +342,29 @@ function decodeAudioToFloat32(audioPath: string): Float32Array {
   return samples;
 }
 
+function getFileType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase().replace(/^\./, "");
+  const category = isVideoFile(filePath) ? "video" : "audio";
+  return ext ? `${category}/${ext}` : category;
+}
+
+function buildFileMetadata(filePath: string, durationMs: number): FileMetadata {
+  const clampedDurationMs = Math.max(0, Math.round(durationMs));
+  return {
+    filename: path.basename(filePath),
+    fileType: getFileType(filePath),
+    durationMs: clampedDurationMs,
+    durationTimestamp: formatMsToTimestamp(clampedDurationMs),
+    durationSeconds: `${(clampedDurationMs / 1000).toFixed(2)}s`,
+  };
+}
+
 async function transcribeAudioSegments(options: {
   filePath: string;
   language?: string;
   modelPath?: string;
   directory?: string;
-}): Promise<TranscriptionSegment[]> {
+}): Promise<{ resolvedInputPath: string; segments: TranscriptionSegment[]; durationMs: number }> {
   if (!options.filePath || !options.filePath.trim()) {
     throw new Error(
       "Missing required 'filePath' argument. Hint: Provide a valid path to an audio or video file (e.g. .wav, .mp3, .m4a, .ogg, .flac, .webm, .mp4, .mkv, .mov).",
@@ -368,7 +399,11 @@ async function transcribeAudioSegments(options: {
   const cacheKey = `${resolvedInputPath}:${stat.mtimeMs}:${stat.size}:${language}:${resolvedModelPath}`;
   const cached = transcriptionCache.get(cacheKey);
   if (cached) {
-    return cached;
+    return {
+      resolvedInputPath,
+      segments: cached.segments,
+      durationMs: cached.durationMs,
+    };
   }
 
   const modelData = fs.readFileSync(resolvedModelPath);
@@ -391,6 +426,8 @@ async function transcribeAudioSegments(options: {
       }
     }
   }
+
+  const durationMs = Math.round((pcm.length / SAMPLE_RATE) * 1000);
 
   const whisperFactory = require("whisper.cpp") as WhisperFactory;
   const stdoutLines: string[] = [];
@@ -444,8 +481,8 @@ async function transcribeAudioSegments(options: {
     }
   }
 
-  transcriptionCache.set(cacheKey, segments);
-  return segments;
+  transcriptionCache.set(cacheKey, { segments, durationMs });
+  return { resolvedInputPath, segments, durationMs };
 }
 
 function extractTimestampedWords(
@@ -502,9 +539,19 @@ async function transcribeAudioFile(options: {
   modelPath?: string;
   directory?: string;
 }): Promise<string> {
-  const segments = await transcribeAudioSegments(options);
+  const { resolvedInputPath, segments, durationMs } =
+    await transcribeAudioSegments(options);
+  const metadata = buildFileMetadata(resolvedInputPath, durationMs);
   const words = extractTimestampedWords(segments);
-  return words.map((w) => `[${w.start} --> ${w.end}] ${w.word}`).join("\n");
+  const headerLines = [
+    `Filename: ${metadata.filename}`,
+    `File type: ${metadata.fileType}`,
+    `Duration: ${metadata.durationTimestamp} (${metadata.durationSeconds})`,
+  ];
+  const wordLines = words.map((w) => `[${w.start} --> ${w.end}] ${w.word}`);
+  return wordLines.length > 0
+    ? `${headerLines.join("\n")}\n\n${wordLines.join("\n")}`
+    : headerLines.join("\n");
 }
 
 type SupportedConvertFormat = "wav" | "mp3" | "ogg" | "flac" | "m4a" | "pcmf32";
@@ -629,7 +676,7 @@ const WhisperPlugin: Plugin = async () => {
     tool: {
       transcribe: tool({
         description:
-          "Transcribe audio, voice, or video files (.wav, .mp3, .m4a, .ogg, .flac, .webm, .mp4, .mkv, .mov, .avi, .pcmf32) into a timestamped list of spoken words ([HH:MM:SS.mmm --> HH:MM:SS.mmm] word) using whisper.cpp. For video files, automatically isolates the audio track before transcription. Always use this tool instead of read or bash when the user references an audio or video file. Run this tool once per file and search the returned transcript for words, phrases, or timestamps instead of transcribing the file multiple times.",
+          "Transcribe audio, voice, or video files (.wav, .mp3, .m4a, .ogg, .flac, .webm, .mp4, .mkv, .mov, .avi, .pcmf32) into a timestamped list of spoken words ([HH:MM:SS.mmm --> HH:MM:SS.mmm] word) with file metadata (filename, file type, overall soundtrack duration) using whisper.cpp. For video files, automatically isolates the audio track before transcription. Always use this tool instead of read or bash when the user references an audio or video file. Run this tool once per file and search the returned transcript for words, phrases, or timestamps instead of transcribing the file multiple times.",
         args: {
           filePath: tool.schema
             .string()

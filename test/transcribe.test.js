@@ -25,15 +25,27 @@ function createTestContext() {
 
 const WORD_LINE_REGEX =
   /^\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\] (.+)$/
+const DURATION_REGEX =
+  /^(\d{2}:\d{2}:\d{2}\.\d{3}) \((\d+(?:\.\d+)?)s\)$/
 
-function parseTimestampedWordLines(output) {
+function parseTranscriptionOutput(output) {
   const lines = output
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-  assert.ok(lines.length > 0, "Expected non-empty timestamped word list")
+  assert.ok(lines.length > 3, "Expected metadata header and non-empty timestamped word list")
 
-  return lines.map((line) => {
+  assert.match(lines[0], /^Filename:\s+.+$/)
+  assert.match(lines[1], /^File type:\s+.+$/)
+  assert.match(lines[2], /^Duration:\s+\d{2}:\d{2}:\d{2}\.\d{3} \(\d+(?:\.\d+)?s\)$/)
+
+  const filename = lines[0].replace(/^Filename:\s+/, "")
+  const fileType = lines[1].replace(/^File type:\s+/, "")
+  const durationRaw = lines[2].replace(/^Duration:\s+/, "")
+  const durationMatch = DURATION_REGEX.exec(durationRaw)
+  assert.ok(durationMatch, `Expected valid duration format, got: ${durationRaw}`)
+
+  const words = lines.slice(3).map((line) => {
     const match = WORD_LINE_REGEX.exec(line)
     assert.ok(
       match,
@@ -45,9 +57,19 @@ function parseTimestampedWordLines(output) {
       word: match[3],
     }
   })
+
+  return {
+    metadata: {
+      filename,
+      fileType,
+      durationTimestamp: durationMatch[1],
+      durationSeconds: Number(durationMatch[2]),
+    },
+    words,
+  }
 }
 
-test("whisper2opencode v1 plugin registers transcribe tool and returns a timestamped list of spoken words", async () => {
+test("whisper2opencode v1 plugin registers transcribe tool and returns file metadata and a timestamped list of spoken words", async () => {
   const hooks = await WhisperPlugin({})
   assert.ok(hooks.tool, "Plugin should return tool map")
   assert.ok(hooks.tool.transcribe, "Plugin should register 'transcribe' tool")
@@ -62,7 +84,12 @@ test("whisper2opencode v1 plugin registers transcribe tool and returns a timesta
   )
 
   assert.equal(typeof output, "string")
-  const entries = parseTimestampedWordLines(output)
+  const { metadata, words: entries } = parseTranscriptionOutput(output)
+  assert.equal(metadata.filename, "jfk.wav")
+  assert.equal(metadata.fileType, "audio/wav")
+  assert.equal(metadata.durationTimestamp, "00:00:11.000")
+  assert.equal(metadata.durationSeconds, 11)
+
   const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(" ")
   assert.match(reconstructedText, /fellow americans/)
   assert.match(reconstructedText, /what you can do for your country/)
@@ -73,7 +100,7 @@ test("whisper2opencode v1 plugin registers transcribe tool and returns a timesta
   assert.ok(countryMatches[1].start > countryMatches[0].start)
 })
 
-test("whisper2opencode isolates audio from video files and transcribes into timestamped words", async () => {
+test("whisper2opencode isolates audio from video files and transcribes into metadata and timestamped words", async () => {
   const hooks = await WhisperPlugin({})
   const videoPath = path.join(os.tmpdir(), `whisper2opencode-test-video-${process.pid}.mp4`)
 
@@ -111,7 +138,11 @@ test("whisper2opencode isolates audio from video files and transcribes into time
     )
 
     assert.equal(typeof output, "string")
-    const entries = parseTimestampedWordLines(output)
+    const { metadata, words: entries } = parseTranscriptionOutput(output)
+    assert.equal(metadata.filename, path.basename(videoPath))
+    assert.equal(metadata.fileType, "video/mp4")
+    assert.ok(metadata.durationSeconds >= 10.9 && metadata.durationSeconds <= 11.2)
+
     const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(" ")
     assert.match(reconstructedText, /fellow americans/)
     assert.match(reconstructedText, /what you can do for your country/)

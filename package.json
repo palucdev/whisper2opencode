@@ -27,7 +27,7 @@
     "whisper.cpp": "^1.0.3"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "typescript": "^5.8.2"
   },
   "keywords": [
