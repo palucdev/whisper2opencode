@@ -325,3 +325,34 @@ test("whisper2opencode caches transcription results for unchanged files", async 
   assert.equal(second, first)
   assert.ok(elapsedMs < 100, `Expected cached transcription under 100ms, got ${elapsedMs}ms`)
 })
+
+test("whisper2opencode ships and registers the transcriber agent definition with access to transcribe tool", async () => {
+  const shippedAgentPath = path.resolve("/home/projekty/whisper2opencode/dist/agents/transcriber.md")
+  assert.ok(fs.existsSync(shippedAgentPath), "Expected dist/agents/transcriber.md to be shipped in dist/")
+
+  const hooks = await WhisperPlugin({})
+  assert.equal(typeof hooks.config, "function", "Expected plugin to expose config hook")
+
+  const config = {}
+  await hooks.config(config)
+
+  assert.ok(config.agent, "Expected config.agent to be initialized")
+  const transcriber = config.agent.transcriber
+  assert.ok(transcriber, "Expected 'transcriber' agent to be registered in config.agent")
+  assert.equal(transcriber.mode, "subagent")
+  assert.equal(typeof transcriber.description, "string")
+  assert.ok(transcriber.description.length > 0)
+  assert.equal(transcriber.tools?.transcribe, true)
+  assert.equal(transcriber.permission?.transcribe, "allow")
+  assert.match(transcriber.prompt, /transcribe/i)
+  assert.match(transcriber.prompt, /single/i)
+  assert.match(transcriber.prompt, /analyze/i)
+  assert.match(transcriber.prompt, /main agent/i)
+
+  // Verify user-defined agent config is not overwritten
+  const customAgent = { description: "custom", prompt: "custom prompt" }
+  const customConfig = { agent: { transcriber: customAgent } }
+  await hooks.config(customConfig)
+  assert.equal(customConfig.agent.transcriber, customAgent)
+})
+
