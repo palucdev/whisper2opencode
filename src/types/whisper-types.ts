@@ -54,3 +54,10 @@ export type ConvertAudioOptions = {
   overwrite?: boolean;
   directory?: string;
 };
+
+export type SaveTranscriptionOptions = {
+  filePath: string;
+  content: string;
+  directory?: string;
+};
+

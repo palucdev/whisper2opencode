@@ -9,6 +9,7 @@ import { PLUGIN_VERSION } from "./utils/plugin-info.js";
 import type { OpenCodeConfig } from "./types/opencode-types.js";
 import { transcribe } from "./tools/transcribe.js";
 import { convert_audio } from "./tools/convert_audio.js";
+import { save_transcription } from "./tools/save_transcription.js";
 import { configureAgents } from "./configuration/agents-config.js";
 
 // Only the plugin factory method should be exported from this file due to OpenCode plugin handling
@@ -18,6 +19,7 @@ const WhisperPlugin: Plugin = async () => {
     tool: {
       transcribe,
       convert_audio,
+      save_transcription,
     },
     /**
      * Register whisper2opencode's agents so OpenCode discovers

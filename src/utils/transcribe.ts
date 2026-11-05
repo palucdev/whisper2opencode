@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import type {
+  SaveTranscriptionOptions,
   TranscribeOptions,
   TranscriptionMediaResult,
   TranscriptionSegment,
@@ -212,3 +213,70 @@ export async function transcribeAudioFile(
     ? `${headerLines.join("\n")}\n\n${wordLines.join("\n")}`
     : headerLines.join("\n");
 }
+
+export function saveTranscriptionFile(
+  options: SaveTranscriptionOptions,
+): string {
+  const baseDir = path.resolve(options.directory ?? process.cwd());
+  const rawFilePath = options.filePath?.trim();
+  if (!rawFilePath) {
+    throw new Error(
+      "Missing required 'filePath' argument. Hint: Provide a relative '.txt' file path inside the working directory (e.g. 'transcription.txt').",
+    );
+  }
+
+  if (typeof options.content !== "string" || !options.content.trim()) {
+    throw new Error(
+      "Missing or empty 'content' argument. Hint: Provide the non-empty transcription text to save.",
+    );
+  }
+
+  const candidatePath = path.isAbsolute(rawFilePath)
+    ? path.resolve(rawFilePath)
+    : path.resolve(baseDir, rawFilePath);
+
+  const relativeToBase = path.relative(baseDir, candidatePath);
+  if (
+    !relativeToBase ||
+    relativeToBase.startsWith("..") ||
+    path.isAbsolute(relativeToBase)
+  ) {
+    throw new Error(
+      `Output path "${candidatePath}" is outside the working directory "${baseDir}". Hint: Provide a relative '.txt' file path inside the current working directory without '..' traversal.`,
+    );
+  }
+
+  const segments = relativeToBase.split(path.sep);
+  if (segments.some((seg) => seg.startsWith("."))) {
+    throw new Error(
+      `Output path "${candidatePath}" cannot target hidden files or directories. Hint: Provide a standard '.txt' filename inside the working directory.`,
+    );
+  }
+
+  const ext = path.extname(candidatePath);
+  let resolvedOutputPath: string;
+  if (ext === "") {
+    resolvedOutputPath = `${candidatePath}.txt`;
+  } else if (ext.toLowerCase() !== ".txt") {
+    throw new Error(
+      `Invalid transcription file extension "${ext}" for "${candidatePath}". Only ".txt" transcription files are allowed. Hint: Use a ".txt" file extension (e.g. "${path.basename(candidatePath, ext)}.txt").`,
+    );
+  } else {
+    resolvedOutputPath = candidatePath;
+  }
+
+  if (fs.existsSync(resolvedOutputPath)) {
+    throw new Error(
+      `Transcription file already exists: ${resolvedOutputPath}. Existing files cannot be modified or overwritten. Hint: Choose a new, non-existent '.txt' filename within the working directory.`,
+    );
+  }
+
+  fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
+  fs.writeFileSync(resolvedOutputPath, options.content, {
+    encoding: "utf8",
+    flag: "wx",
+  });
+
+  return resolvedOutputPath;
+}
+
