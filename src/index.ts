@@ -49,6 +49,45 @@ const DEFAULT_MODEL_NAME = "ggml-base.en.bin";
 const DEFAULT_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${DEFAULT_MODEL_NAME}`;
 const SEGMENT_REGEX =
   /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
+
+type TranscriptionSegment = {
+  start: string;
+  end: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+};
+
+type TimestampedWord = {
+  word: string;
+  start: string;
+  end: string;
+  startMs: number;
+  endMs: number;
+};
+
+const transcriptionCache = new Map<string, TranscriptionSegment[]>();
+
+function parseTimestampToMs(timestamp: string): number {
+  const match = /^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(timestamp.trim());
+  if (!match) {
+    return 0;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const millis = Number(match[4]);
+  return (hours * 3600 + minutes * 60 + seconds) * 1000 + millis;
+}
+
+function formatMsToTimestamp(ms: number): string {
+  const clamped = Math.max(0, Math.round(ms));
+  const hours = Math.floor(clamped / 3_600_000);
+  const minutes = Math.floor((clamped % 3_600_000) / 60_000);
+  const seconds = Math.floor((clamped % 60_000) / 1000);
+  const millis = clamped % 1000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
 const VIDEO_EXTENSIONS = new Set([
   ".mp4",
   ".mkv",
@@ -289,12 +328,12 @@ function decodeAudioToFloat32(audioPath: string): Float32Array {
   return samples;
 }
 
-async function transcribeAudioFile(options: {
+async function transcribeAudioSegments(options: {
   filePath: string;
   language?: string;
   modelPath?: string;
   directory?: string;
-}): Promise<string> {
+}): Promise<TranscriptionSegment[]> {
   if (!options.filePath || !options.filePath.trim()) {
     throw new Error(
       "Missing required 'filePath' argument. Hint: Provide a valid path to an audio or video file (e.g. .wav, .mp3, .m4a, .ogg, .flac, .webm, .mp4, .mkv, .mov).",
@@ -325,6 +364,13 @@ async function transcribeAudioFile(options: {
   }
 
   const resolvedModelPath = await resolveModelPath(options.modelPath, baseDir);
+  const language = options.language?.trim() || "en";
+  const cacheKey = `${resolvedInputPath}:${stat.mtimeMs}:${stat.size}:${language}:${resolvedModelPath}`;
+  const cached = transcriptionCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const modelData = fs.readFileSync(resolvedModelPath);
 
   let isolatedAudioPath: string | undefined;
@@ -359,8 +405,6 @@ async function transcribeAudioFile(options: {
     },
   });
 
-  const language = options.language?.trim() || "en";
-
   try {
     whisper.FS_createDataFile("/", "whisper.bin", modelData, true, true);
     if (!whisper.init("whisper.bin")) {
@@ -381,15 +425,86 @@ async function transcribeAudioFile(options: {
     whisper.PThread?.terminateAllThreads();
   }
 
-  const segments: string[] = [];
+  const segments: TranscriptionSegment[] = [];
   for (const line of stdoutLines) {
     const match = SEGMENT_REGEX.exec(line.trim());
-    if (match && match[3]) {
-      segments.push(match[3].trim());
+    if (match && match[1] && match[2] && match[3]) {
+      const start = match[1];
+      const end = match[2];
+      const text = match[3].trim();
+      if (text.length > 0) {
+        segments.push({
+          start,
+          end,
+          startMs: parseTimestampToMs(start),
+          endMs: parseTimestampToMs(end),
+          text,
+        });
+      }
     }
   }
 
-  return segments.join(" ").trim();
+  transcriptionCache.set(cacheKey, segments);
+  return segments;
+}
+
+function extractTimestampedWords(
+  segments: TranscriptionSegment[],
+): TimestampedWord[] {
+  const words: TimestampedWord[] = [];
+  const tokenRegex = /\S+/g;
+
+  for (const seg of segments) {
+    for (const match of seg.text.matchAll(tokenRegex)) {
+      const rawToken = match[0];
+      if (/^\[.*\]$/.test(rawToken)) {
+        continue;
+      }
+
+      const cleanWord = rawToken.replace(
+        /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,
+        "",
+      );
+      if (!cleanWord) {
+        continue;
+      }
+
+      const tokenStart = match.index ?? 0;
+      const tokenEnd = tokenStart + rawToken.length;
+      const startRatio =
+        seg.text.length > 0 ? tokenStart / seg.text.length : 0;
+      const endRatio = seg.text.length > 0 ? tokenEnd / seg.text.length : 1;
+
+      const startMs = Math.round(
+        seg.startMs + startRatio * (seg.endMs - seg.startMs),
+      );
+      const endMs = Math.max(
+        startMs,
+        Math.round(seg.startMs + endRatio * (seg.endMs - seg.startMs)),
+      );
+
+      words.push({
+        word: cleanWord,
+        start: formatMsToTimestamp(startMs),
+        end: formatMsToTimestamp(endMs),
+        startMs,
+        endMs,
+      });
+    }
+  }
+
+  return words;
+}
+
+async function transcribeAudioFile(options: {
+  filePath: string;
+  language?: string;
+  modelPath?: string;
+  directory?: string;
+}): Promise<string> {
+  const segments = await transcribeAudioSegments(options);
+  const words = extractTimestampedWords(segments);
+  return words.map((w) => `[${w.start} --> ${w.end}] ${w.word}`).join("\n");
 }
 
 type SupportedConvertFormat = "wav" | "mp3" | "ogg" | "flac" | "m4a" | "pcmf32";
@@ -514,7 +629,7 @@ const WhisperPlugin: Plugin = async () => {
     tool: {
       transcribe: tool({
         description:
-          "Transcribe audio, voice, or video files (.wav, .mp3, .m4a, .ogg, .flac, .webm, .mp4, .mkv, .mov, .avi, .pcmf32) to text using whisper.cpp. For video files, automatically isolates the audio track before transcription. Always use this tool instead of read or bash when the user references an audio or video file.",
+          "Transcribe audio, voice, or video files (.wav, .mp3, .m4a, .ogg, .flac, .webm, .mp4, .mkv, .mov, .avi, .pcmf32) into a timestamped list of spoken words ([HH:MM:SS.mmm --> HH:MM:SS.mmm] word) using whisper.cpp. For video files, automatically isolates the audio track before transcription. Always use this tool instead of read or bash when the user references an audio or video file. Run this tool once per file and search the returned transcript for words, phrases, or timestamps instead of transcribing the file multiple times.",
         args: {
           filePath: tool.schema
             .string()

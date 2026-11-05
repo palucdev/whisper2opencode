@@ -23,7 +23,31 @@ function createTestContext() {
   }
 }
 
-test("whisper2opencode v1 plugin registers transcribe tool and decodes audio", async () => {
+const WORD_LINE_REGEX =
+  /^\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\] (.+)$/
+
+function parseTimestampedWordLines(output) {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  assert.ok(lines.length > 0, "Expected non-empty timestamped word list")
+
+  return lines.map((line) => {
+    const match = WORD_LINE_REGEX.exec(line)
+    assert.ok(
+      match,
+      `Expected line to match '[HH:MM:SS.mmm --> HH:MM:SS.mmm] word', got: ${line}`,
+    )
+    return {
+      start: match[1],
+      end: match[2],
+      word: match[3],
+    }
+  })
+}
+
+test("whisper2opencode v1 plugin registers transcribe tool and returns a timestamped list of spoken words", async () => {
   const hooks = await WhisperPlugin({})
   assert.ok(hooks.tool, "Plugin should return tool map")
   assert.ok(hooks.tool.transcribe, "Plugin should register 'transcribe' tool")
@@ -38,11 +62,18 @@ test("whisper2opencode v1 plugin registers transcribe tool and decodes audio", a
   )
 
   assert.equal(typeof output, "string")
-  assert.match(output.toLowerCase(), /fellow americans/)
-  assert.match(output.toLowerCase(), /what you can do for your country/)
+  const entries = parseTimestampedWordLines(output)
+  const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(" ")
+  assert.match(reconstructedText, /fellow americans/)
+  assert.match(reconstructedText, /what you can do for your country/)
+
+  // Verify occurrences of "country" can be searched directly in the transcript
+  const countryMatches = entries.filter((e) => e.word.toLowerCase() === "country")
+  assert.equal(countryMatches.length, 2)
+  assert.ok(countryMatches[1].start > countryMatches[0].start)
 })
 
-test("whisper2opencode isolates audio from video files and transcribes", async () => {
+test("whisper2opencode isolates audio from video files and transcribes into timestamped words", async () => {
   const hooks = await WhisperPlugin({})
   const videoPath = path.join(os.tmpdir(), `whisper2opencode-test-video-${process.pid}.mp4`)
 
@@ -80,8 +111,10 @@ test("whisper2opencode isolates audio from video files and transcribes", async (
     )
 
     assert.equal(typeof output, "string")
-    assert.match(output.toLowerCase(), /fellow americans/)
-    assert.match(output.toLowerCase(), /what you can do for your country/)
+    const entries = parseTimestampedWordLines(output)
+    const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(" ")
+    assert.match(reconstructedText, /fellow americans/)
+    assert.match(reconstructedText, /what you can do for your country/)
   } finally {
     if (fs.existsSync(videoPath)) {
       fs.unlinkSync(videoPath)
@@ -232,4 +265,32 @@ test("whisper2opencode registers convert_audio tool and converts audio formats",
       fs.unlinkSync(outputPcmPath)
     }
   }
+})
+
+test("whisper2opencode caches transcription results for unchanged files", async () => {
+  const hooks = await WhisperPlugin({})
+  const ctx = createTestContext()
+
+  const first = await hooks.tool.transcribe.execute(
+    {
+      filePath: "/tmp/opencode/jfk.wav",
+      language: "en",
+      modelPath: "/tmp/opencode/ggml-tiny.en.bin",
+    },
+    ctx,
+  )
+
+  const start = performance.now()
+  const second = await hooks.tool.transcribe.execute(
+    {
+      filePath: "/tmp/opencode/jfk.wav",
+      language: "en",
+      modelPath: "/tmp/opencode/ggml-tiny.en.bin",
+    },
+    ctx,
+  )
+  const elapsedMs = performance.now() - start
+
+  assert.equal(second, first)
+  assert.ok(elapsedMs < 100, `Expected cached transcription under 100ms, got ${elapsedMs}ms`)
 })
