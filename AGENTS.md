@@ -15,10 +15,10 @@ This repository provides an OpenCode v1 plugin for audio and video transcription
 ```
 whisper2opencode/
 ├── scripts/
-│   └── copy-markdowns.js       # Copies agents and commands to dist/
+│   └── copy-markdowns.js       # Copies skills, agents, and commands to dist/
 ├── src/
 │   ├── __tests__/              # TypeScript test suites (bun:test)
-│   │   ├── configuration/      # Agent and command config tests
+│   │   ├── configuration/      # Skill, agent, and command config tests
 │   │   ├── utils/              # Audio, transcribe, file-util tests
 │   │   ├── index.test.ts       # Plugin entry point tests
 │   │   └── tsconfig.json       # Test compiler configuration
@@ -26,7 +26,10 @@ whisper2opencode/
 │   │   └── transcriber.md      # Specialized transcription subagent
 │   ├── commands/               # Slash command definitions (.md)
 │   │   └── transcribe.md       # /transcribe command
-│   ├── configuration/          # Handlers for agent and command configs
+│   ├── configuration/          # Handlers for skill, agent, and command configs
+│   ├── skills/                 # Orchestrator skill definitions (SKILL.md)
+│   │   └── audio-video-transcription/
+│   │       └── SKILL.md        # Skill enabling main agent orchestrators to use transcriber subagents
 │   ├── tools/                  # OpenCode tool implementations
 │   │   ├── convert_audio.ts    # Audio conversion and track extraction
 │   │   ├── save_transcription.ts # Working-directory text file saver

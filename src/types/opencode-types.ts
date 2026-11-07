@@ -3,6 +3,7 @@
 export interface OpenCodeConfig {
   agent: any;
   command: Record<string, OpenCodeCommand>;
+  skills: any;
 }
 
 export interface OpenCodeCommand {

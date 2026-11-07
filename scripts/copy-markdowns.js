@@ -1,5 +1,11 @@
 import fs from 'fs';
 
+// Copy the 'skills' folder recursively into 'dist/skills'
+if (fs.existsSync('src/skills')) {
+  fs.cpSync('src/skills', 'dist/skills', { recursive: true });
+  console.log('Copied skills to dist/');
+}
+
 // Copy the 'agents' folder recursively into 'dist/agents'
 if (fs.existsSync('src/agents')) {
   fs.cpSync('src/agents', 'dist/agents', { recursive: true });

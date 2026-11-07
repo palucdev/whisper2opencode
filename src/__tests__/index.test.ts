@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import * as agentsConfig from '../configuration/agents-config.js';
 import * as commandsConfig from '../configuration/commands-config.js';
+import * as skillsConfig from '../configuration/skills-config.js';
 import WhisperPlugin from '../index.js';
 import { convert_audio } from '../tools/convert_audio.js';
 import { save_transcription } from '../tools/save_transcription.js';
@@ -51,20 +52,23 @@ describe('WhisperPlugin', () => {
   });
 
   describe('config hook', () => {
-    test('should configure commands and agents from config', async () => {
+    test('should configure skills, commands, and agents from config', async () => {
+      const skillsSpy = spyOn(skillsConfig, 'configureSkills').mockImplementation(() => {});
       const commandsSpy = spyOn(commandsConfig, 'configureCommands').mockImplementation(() => {});
       const agentsSpy = spyOn(agentsConfig, 'configureAgents').mockImplementation(() => {});
       const consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
 
       try {
         const plugin = await WhisperPlugin(mockPluginInput(tmpDir));
-        const inputConfig = { agent: {}, command: {} };
+        const inputConfig = { agent: {}, command: {}, skills: {} };
 
         await plugin.config!(inputConfig as any);
 
+        expect(skillsSpy).toHaveBeenCalledWith(inputConfig as any);
         expect(commandsSpy).toHaveBeenCalledWith(inputConfig as any);
         expect(agentsSpy).toHaveBeenCalledWith(inputConfig as any);
       } finally {
+        skillsSpy.mockRestore();
         commandsSpy.mockRestore();
         agentsSpy.mockRestore();
         consoleLogSpy.mockRestore();

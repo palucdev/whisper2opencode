@@ -1,0 +1,69 @@
+import { describe, expect, test } from 'bun:test';
+import matter from 'gray-matter';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { configureSkills } from '../../configuration/skills-config.js';
+import type { OpenCodeConfig } from '../../types/opencode-types.js';
+import { PLUGIN_ROOT } from '../../utils/plugin-info.js';
+
+describe('configureSkills', () => {
+  const expectedSkillsDir = path.join(PLUGIN_ROOT, 'skills');
+
+  test('should initialize skills and skills.paths when skills is undefined', () => {
+    const config = {} as OpenCodeConfig;
+    configureSkills(config);
+
+    expect(config.skills).toBeDefined();
+    expect(config.skills.paths).toEqual([expectedSkillsDir]);
+  });
+
+  test('should safely handle null/undefined config without throwing', () => {
+    expect(() => configureSkills(null as any)).not.toThrow();
+    expect(() => configureSkills(undefined as any)).not.toThrow();
+  });
+
+  test('should initialize skills.paths when skills object exists but skills.paths is undefined', () => {
+    const config = { skills: {} } as OpenCodeConfig;
+    configureSkills(config);
+
+    expect(config.skills.paths).toEqual([expectedSkillsDir]);
+  });
+
+  test('should append skills directory to existing paths list without modifying existing entries', () => {
+    const existingPath = '/custom/skills/path';
+    const config = {
+      skills: {
+        paths: [existingPath],
+      },
+    } as OpenCodeConfig;
+
+    configureSkills(config);
+
+    expect(config.skills.paths).toEqual([existingPath, expectedSkillsDir]);
+  });
+
+  test('should not add duplicate skills directory if it is already present in skills.paths', () => {
+    const config = {
+      skills: {
+        paths: [expectedSkillsDir],
+      },
+    } as OpenCodeConfig;
+
+    configureSkills(config);
+
+    expect(config.skills.paths).toEqual([expectedSkillsDir]);
+    expect(config.skills.paths.length).toBe(1);
+  });
+
+  test('should ship audio-video-transcription skill with valid frontmatter and subagent delegation instructions', () => {
+    const skillPath = path.join(expectedSkillsDir, 'audio-video-transcription', 'SKILL.md');
+    expect(fs.existsSync(skillPath)).toBe(true);
+
+    const parsed = matter(fs.readFileSync(skillPath, 'utf8'));
+    expect(parsed.data.name).toBe('audio-video-transcription');
+    expect(parsed.data.description).toContain('Audio and video transcription');
+    expect(parsed.data.description).toContain('transcriber');
+    expect(parsed.content).toContain('subagent_type: "transcriber"');
+  });
+});

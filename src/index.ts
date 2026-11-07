@@ -1,12 +1,13 @@
 /**
  * Whisper2OpenCode Plugin
- * Registers transcription tools, commands, and agents via OpenCode's JS event system.
+ * Registers transcription tools, skills, commands, and agents via OpenCode's JS event system.
  */
 
 import type { Hooks, Plugin, PluginInput, PluginOptions } from '@opencode-ai/plugin';
 
 import { configureAgents } from './configuration/agents-config.js';
 import { configureCommands } from './configuration/commands-config.js';
+import { configureSkills } from './configuration/skills-config.js';
 import { convert_audio } from './tools/convert_audio.js';
 import { save_transcription } from './tools/save_transcription.js';
 import { transcribe } from './tools/transcribe.js';
@@ -24,13 +25,14 @@ const WhisperPlugin = (async (input?: Partial<PluginInput>, options?: PluginOpti
       save_transcription,
     },
     /**
-     * Register whisper2opencode's commands and agents so OpenCode discovers
+     * Register whisper2opencode's skills, commands, and agents so OpenCode discovers
      * them without requiring manual config file edits.
      */
     [HookEvent.Config]: async (config: unknown) => {
       console.log(`[whisper2opencode] Starting plugin installation (v${PLUGIN_VERSION})...`);
       const typedConfig = config as OpenCodeConfig;
 
+      configureSkills(typedConfig);
       configureCommands(typedConfig);
       configureAgents(typedConfig);
 

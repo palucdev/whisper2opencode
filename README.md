@@ -10,6 +10,7 @@ Whisper2OpenCode extends [OpenCode](https://opencode.ai/) with speech-to-text ca
 
 - **High-Precision Transcription**: Word-level timestamps (`[HH:MM:SS.mmm --> HH:MM:SS.mmm] word`) with full metadata (filename, format, soundtrack duration).
 - **Video & Audio Track Isolation**: Automatic extraction of audio streams from video containers (`.mp4`, `.mkv`, `.mov`, `.webm`, `.avi`) via `ffmpeg-static`.
+- **Orchestrator Transcription Skill**: Built-in `audio-video-transcription` skill enabling any main agent or external workflow orchestrator to delegate single-file or parallel multi-file transcription to `transcriber` subagents.
 - **Transcriber Subagent**: Autonomous subagent (`transcriber`) for single-pass media processing, keyword matching, timeline summarization, and direct Q&A.
 - **Slash Command**: Use `/transcribe <file>` in your OpenCode prompt to transcribe and analyze any media file in one shot.
 - **Safe File Saving**: Save transcription transcripts to `.txt` files in your workspace with path traversal and overwrite protection via `save_transcription`.
@@ -25,7 +26,7 @@ whisper2opencode/
 │   └── copy-markdowns.js
 ├── src/
 │   ├── __tests__/              # TypeScript unit and integration tests (bun:test)
-│   │   ├── configuration/      # Agent and command configuration tests
+│   │   ├── configuration/      # Skill, agent, and command configuration tests
 │   │   ├── utils/              # Audio decoding, transcription, file tests
 │   │   ├── index.test.ts       # Plugin entry point tests
 │   │   └── tsconfig.json       # Test project compiler options
@@ -34,6 +35,9 @@ whisper2opencode/
 │   ├── commands/               # Slash command definitions (.md)
 │   │   └── transcribe.md       # /transcribe command definition
 │   ├── configuration/          # OpenCode configuration handlers
+│   ├── skills/                 # Orchestrator skill definitions (SKILL.md)
+│   │   └── audio-video-transcription/
+│   │       └── SKILL.md        # Transcription orchestration skill for main agents
 │   ├── tools/                  # OpenCode tool definitions
 │   │   ├── convert_audio.ts    # Audio conversion and normalization
 │   │   ├── save_transcription.ts # Safe transcription file writer
