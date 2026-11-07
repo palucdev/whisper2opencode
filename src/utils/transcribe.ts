@@ -16,6 +16,9 @@ const require = createRequire(import.meta.url);
 const DEFAULT_MODEL_NAME = 'ggml-base.en.bin';
 const DEFAULT_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${DEFAULT_MODEL_NAME}`;
 const SEGMENT_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
+export const TRANSCRIPTION_METADATA_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n*/;
+const RAW_METADATA_HEADER_REGEX =
+  /^(?:Filename|Source file|source_file):\s*(.+)\r?\n(?:File type:\s*.+\r?\n)?(?:Duration|duration):\s*(.+)(?:\r?\n)+/i;
 
 const transcriptionCache = new Map<string, TranscriptionMediaResult>();
 
@@ -180,6 +183,83 @@ export async function transcribeAudioFile(options: TranscribeOptions): Promise<s
   return wordLines.length > 0 ? `${headerLines.join('\n')}\n\n${wordLines.join('\n')}` : headerLines.join('\n');
 }
 
+function stripSurroundingQuotes(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function extractMetadataAndBody(rawContent: string): {
+  sourceFile?: string;
+  duration?: string;
+  body: string;
+} {
+  const trimmed = rawContent.trim();
+  const frontmatterMatch = TRANSCRIPTION_METADATA_REGEX.exec(trimmed);
+  if (frontmatterMatch) {
+    const metadataBlock = frontmatterMatch[1] ?? '';
+    const body = trimmed.slice(frontmatterMatch[0].length).trim();
+    let sourceFile: string | undefined;
+    let duration: string | undefined;
+
+    for (const line of metadataBlock.split(/\r?\n/)) {
+      const sourceMatch = /^(?:source_file|sourceFile|source file|filename|file):\s*(.+)$/i.exec(line.trim());
+      if (sourceMatch?.[1]) {
+        sourceFile = stripSurroundingQuotes(sourceMatch[1]);
+        continue;
+      }
+      const durationMatch = /^duration:\s*(.+)$/i.exec(line.trim());
+      if (durationMatch?.[1]) {
+        duration = stripSurroundingQuotes(durationMatch[1]);
+      }
+    }
+
+    return { sourceFile, duration, body };
+  }
+
+  const rawHeaderMatch = RAW_METADATA_HEADER_REGEX.exec(trimmed);
+  if (rawHeaderMatch?.[1] && rawHeaderMatch[2]) {
+    const sourceFile = stripSurroundingQuotes(rawHeaderMatch[1]);
+    const duration = stripSurroundingQuotes(rawHeaderMatch[2]);
+    const body = trimmed.slice(rawHeaderMatch[0].length).trim();
+    return { sourceFile, duration, body };
+  }
+
+  return { body: trimmed };
+}
+
+export function stripTranscriptionMetadata(content: string): string {
+  return content.replace(TRANSCRIPTION_METADATA_REGEX, '');
+}
+
+export function formatTranscriptionWithMetadata(options: { content: string; sourceFile?: string; duration?: string }): string {
+  const extracted = extractMetadataAndBody(options.content);
+  if (!extracted.body) {
+    throw new Error(
+      "Missing or empty transcription body in 'content'. Hint: Provide non-empty spoken transcript text in addition to the metadata header.",
+    );
+  }
+
+  const rawSourceFile = options.sourceFile?.trim() || extracted.sourceFile?.trim();
+  if (!rawSourceFile) {
+    throw new Error(
+      "Missing required source file metadata ('sourceFile'). Hint: Provide 'sourceFile' (e.g. 'jfk.wav') or include 'source_file: <filename>' in a leading --- metadata --- block.",
+    );
+  }
+
+  const resolvedDuration = options.duration?.trim() || extracted.duration?.trim();
+  if (!resolvedDuration) {
+    throw new Error(
+      "Missing required audio/video duration metadata ('duration'). Hint: Provide 'duration' (e.g. '00:00:11.000 (11.00s)') or include 'duration: <duration>' in a leading --- metadata --- block.",
+    );
+  }
+
+  const resolvedSourceFile = path.basename(rawSourceFile);
+  return `---\nsource_file: ${resolvedSourceFile}\nduration: ${resolvedDuration}\n---\n\n${extracted.body}`;
+}
+
 export function saveTranscriptionFile(options: SaveTranscriptionOptions): string {
   const baseDir = path.resolve(options.directory ?? process.cwd());
   const rawFilePath = options.filePath?.trim();
@@ -227,8 +307,14 @@ export function saveTranscriptionFile(options: SaveTranscriptionOptions): string
     );
   }
 
+  const formattedContent = formatTranscriptionWithMetadata({
+    content: options.content,
+    sourceFile: options.sourceFile,
+    duration: options.duration,
+  });
+
   fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
-  fs.writeFileSync(resolvedOutputPath, options.content, {
+  fs.writeFileSync(resolvedOutputPath, formattedContent, {
     encoding: 'utf8',
     flag: 'wx',
   });

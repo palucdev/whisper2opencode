@@ -17,6 +17,14 @@ const prepareAgent = ({ data, content }: matter.GrayMatterFile<string>) => {
 export const configureAgents = (config: OpenCodeConfig): void => {
   if (!config || typeof config !== 'object') return;
   config.agent = config.agent || {};
+  config.tools = config.tools || {};
+  if (config.tools.transcribe === undefined) {
+    config.tools.transcribe = false;
+  }
+  config.permission = config.permission || {};
+  if (config.permission.transcribe === undefined) {
+    config.permission.transcribe = 'deny';
+  }
   for (const markdown of loadMarkdownDir('agents')) {
     const name = markdown.data.name;
     if (!name) continue;

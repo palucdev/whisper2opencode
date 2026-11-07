@@ -40,8 +40,15 @@ export type ConvertAudioOptions = {
   directory?: string;
 };
 
+export type TranscriptionFileMetadata = {
+  sourceFile: string;
+  duration: string;
+};
+
 export type SaveTranscriptionOptions = {
   filePath: string;
   content: string;
+  sourceFile?: string;
+  duration?: string;
   directory?: string;
 };

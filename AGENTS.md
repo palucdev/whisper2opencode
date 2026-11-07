@@ -46,6 +46,6 @@ whisper2opencode/
 
 1. **Single-Pass Transcription**: Agents must call `transcribe` once per file. All timestamp lookups, word searches, and analyses must be performed on the returned word list.
 2. **Audio Track Isolation**: Video files automatically have their audio stream extracted via `ffmpeg-static`. `convert_audio` serves as a fallback for repairing corrupted or incompatible containers.
-3. **Safe File Operations**: `save_transcription` strictly creates new `.txt` files in the current working directory. It never overwrites, never creates non-`.txt` files, and never traverses outside `directory`.
+3. **Safe File Operations & Transcript Metadata**: `save_transcription` strictly creates new `.txt` files in the current working directory. It never overwrites, never creates non-`.txt` files, and never traverses outside `directory`. Every saved `.txt` file starts with a `---`-delimited YAML frontmatter metadata header (`source_file` and `duration`) separated from the transcript body by a blank line so transcript consumers can easily parse or strip it automatically.
 4. **Clean Model Specification**: Agent definitions specify models directly without alias indirection.
 5. **Fail-Safe Testing**: Tests live in `src/__tests__/`, test source files directly, and run via `bun test src`. Run `bun run type-check` and `bun test src` before committing.

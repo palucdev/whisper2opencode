@@ -1,15 +1,22 @@
 ---
 name: audio-video-transcription
 description: >-
-  Audio and video transcription, speech-to-text conversion, and spoken-content
-  analysis via specialized transcriber subagents. Proactively use this skill
-  whenever the user or workflow references audio or video files (.wav, .mp3,
-  .m4a, .aac, .ogg, .opus, .flac, .pcmf32, .mp4, .m4v, .mkv, .mov, .webm, .avi,
-  .ts), voice notes, meetings, interviews, lectures, podcasts, or screen
-  recordings, or asks to transcribe media, extract spoken dialogue, locate
-  word/phrase timestamps, count spoken keywords, summarize recordings, or save transcripts.
-  Enables any main agent or workflow orchestrator to delegate single-file or parallel multi-file
-  transcription tasks to transcriber subagents.
+  Audio and video transcription, recording analysis, speech-to-text (STT),
+  voice-to-text, and spoken-content extraction via specialized transcriber
+  subagents. Proactively load and use this skill whenever the user or workflow
+  mentions or involves any recording, recordings, audio, video, media, clip,
+  footage, sound, soundtrack, voice, voice note, voice memo, dictation, speech,
+  spoken dialogue, conversation, meeting, standup, call, interview, lecture,
+  presentation, webinar, podcast, screencast, or screen recording, or references
+  media files (.wav, .mp3, .m4a, .aac, .ogg, .opus, .flac, .pcmf32, .mp4, .m4v,
+  .mkv, .mov, .webm, .avi, .ts, .mts, .m2ts). Use when asked to transcribe,
+  caption, subtitle, listen to, or analyze a recording, audio, or video; figure
+  out what was said, spoken, or discussed; extract quotes or dialogue; locate
+  word or phrase timestamps/timecodes; count spoken words or keywords; summarize
+  recordings; or save transcripts. Because the transcribe tool is restricted to
+  the transcriber subagent, main agents and workflow orchestrators must use this
+  skill to delegate single-file or parallel multi-file transcription tasks to
+  transcriber subagents.
 ---
 
 # Audio & Video Transcription Orchestration Skill
@@ -19,8 +26,8 @@ This skill enables any main agent or workflow orchestrator to perform local audi
 ## Core Orchestration Principles
 
 1. **Always Delegate to `transcriber` Subagents**:
-   - Use the `Task` tool with `subagent_type: "transcriber"` whenever an audio or video file needs to be transcribed or analyzed.
-   - Never use `read` or `bash` to inspect raw binary audio/video files, and avoid running `transcribe` directly in the main orchestrator context (raw word-level timestamp output can be thousands of lines per recording and will bloat the main agent's context window).
+   - Use the `Task` tool with `subagent_type: "transcriber"` whenever an audio or video recording needs to be transcribed or analyzed.
+   - The `transcribe` tool is restricted exclusively to the `transcriber` subagent (raw word-level timestamp output can be thousands of lines per recording and would bloat the main agent's context window). Never use `read` or `bash` to inspect raw binary audio/video files.
 2. **One File Per `transcriber` Subagent**:
    - Each `transcriber` subagent is specialized to process **one** media file in a single pass.
 3. **Parallel Fan-Out for Multiple Media Files**:
@@ -37,7 +44,16 @@ This skill enables any main agent or workflow orchestrator to perform local audi
 - **Video Formats (Automatic Audio Track Isolation via `ffmpeg-static`)**: `.mp4`, `.m4v`, `.mkv`, `.mov`, `.webm`, `.avi`, `.ts`, `.mts`, `.m2ts`
 - **Word-Level Timestamps & Metadata**: Extracts filename, media type, total soundtrack duration (`HH:MM:SS.mmm (Xs)`), and word-by-word timestamps (`[HH:MM:SS.mmm --> HH:MM:SS.mmm] word`).
 - **Automatic Container Recovery**: The `transcriber` subagent automatically uses `convert_audio` to normalize incompatible or damaged containers to 16kHz mono if direct transcription fails.
-- **Safe Transcript Persistence**: When instructed, the `transcriber` subagent uses `save_transcription` to save the transcript to a new `.txt` file inside the current working directory (never overwrites existing files or writes outside the workspace).
+- **Safe Transcript Persistence & Metadata Header**: When instructed, the `transcriber` subagent uses `save_transcription` to save the transcript to a new `.txt` file inside the current working directory (never overwrites existing files or writes outside the workspace). Every saved `.txt` file begins with a `---`-delimited YAML frontmatter metadata block (`source_file` and `duration`) separated from the transcript body by a blank line so transcript consumers can easily parse or strip it automatically:
+  ```text
+  ---
+  source_file: <filename>
+  duration: <HH:MM:SS.mmm (Xs)>
+  ---
+
+  <transcript body>
+  ```
+  Downstream consumers can strip this header automatically with `/^---\r?\n[\s\S]*?\r?\n---\r?\n+/`, `sed '1{/^---$/!q;};1,/^---$/d'`, or `gray-matter`.
 
 ---
 

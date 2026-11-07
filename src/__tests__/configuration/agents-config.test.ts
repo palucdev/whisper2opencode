@@ -18,13 +18,31 @@ describe('configureAgents', () => {
     expect(() => configureAgents(undefined as any)).not.toThrow();
   });
 
-  test('should populate config.agent with markdown files from agents directory', () => {
+  test('should populate config.agent with markdown files from agents directory and restrict transcribe tool to transcriber agent', () => {
     const config = {} as OpenCodeConfig;
     configureAgents(config);
 
     expect(Object.keys(config.agent).length).toBeGreaterThan(0);
+    expect(config.tools?.transcribe).toBe(false);
+    expect(config.permission?.transcribe).toBe('deny');
     expect(config.agent.transcriber).toBeDefined();
     expect(config.agent.transcriber.mode).toBe('subagent');
+    expect(config.agent.transcriber.tools?.transcribe).toBe(true);
+    expect(config.agent.transcriber.permission?.transcribe).toBe('allow');
+    expect(config.agent.transcriber.prompt).toContain('source_file:');
+    expect(config.agent.transcriber.prompt).toContain('duration:');
+  });
+
+  test('should preserve existing user-configured tools.transcribe and permission.transcribe settings', () => {
+    const config = {
+      tools: { transcribe: true },
+      permission: { transcribe: 'ask' },
+    } as unknown as OpenCodeConfig;
+
+    configureAgents(config);
+
+    expect(config.tools?.transcribe).toBe(true);
+    expect(config.permission?.transcribe).toBe('ask');
   });
 
   test('should not overwrite existing agent definitions configured by user', () => {

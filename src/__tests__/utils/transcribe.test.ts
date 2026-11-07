@@ -4,10 +4,17 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import matter from 'gray-matter';
 
 import { save_transcription } from '../../tools/save_transcription.js';
 import { transcribe } from '../../tools/transcribe.js';
-import { saveTranscriptionFile, transcribeAudioFile } from '../../utils/transcribe.js';
+import {
+  TRANSCRIPTION_METADATA_REGEX,
+  formatTranscriptionWithMetadata,
+  saveTranscriptionFile,
+  stripTranscriptionMetadata,
+  transcribeAudioFile,
+} from '../../utils/transcribe.js';
 
 const require = createRequire(import.meta.url);
 const ffmpegPath = require('ffmpeg-static') as string;
@@ -210,39 +217,88 @@ describe('transcribe and save_transcription tools', () => {
     ).rejects.toThrow(/Whisper model path is invalid \(is a directory\):[\s\S]*Hint:/);
   });
 
-  test('save_transcription tool saves new .txt transcription files in the working directory and blocks unsafe operations', async () => {
+  test('save_transcription tool saves new .txt transcription files with metadata header and blocks unsafe operations', async () => {
     const tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-save-${process.pid}-`));
     const ctx = createTestContext(tempWorkDir);
 
     try {
-      // Saves a .txt transcription file inside the working directory
+      // Saves a .txt transcription file inside the working directory with delimited metadata header
+      const bodyText = 'And so my fellow Americans, ask not what your country can do for you.';
       const savedPath = (await save_transcription.execute(
         {
           filePath: 'transcripts/jfk.transcription.txt',
-          content: 'And so my fellow Americans, ask not what your country can do for you.',
+          sourceFile: '/tmp/opencode/jfk.wav',
+          duration: '00:00:11.000 (11.00s)',
+          content: bodyText,
         },
         ctx,
       )) as string;
 
       expect(savedPath).toBe(path.join(tempWorkDir, 'transcripts', 'jfk.transcription.txt'));
-      expect(fs.readFileSync(savedPath, 'utf8')).toBe('And so my fellow Americans, ask not what your country can do for you.');
+      const savedContent = fs.readFileSync(savedPath, 'utf8');
+      expect(savedContent).toBe(`---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n\n${bodyText}`);
 
-      // Automatically appends .txt when no extension is provided
+      // Metadata is differentiated from body and easy to clean up automatically (regex, helper, and gray-matter)
+      expect(stripTranscriptionMetadata(savedContent)).toBe(bodyText);
+      expect(savedContent.replace(TRANSCRIPTION_METADATA_REGEX, '')).toBe(bodyText);
+      const parsedMatter = matter(savedContent);
+      expect(parsedMatter.data).toEqual({
+        source_file: 'jfk.wav',
+        duration: '00:00:11.000 (11.00s)',
+      });
+      expect(parsedMatter.content.trim()).toBe(bodyText);
+
+      // Automatically appends .txt when no extension is provided and accepts pre-formatted frontmatter in content without duplicating
       const autoExtPath = (await save_transcription.execute(
         {
           filePath: 'jfk-notes',
-          content: 'Timestamped transcript content',
+          content: `---\nsource_file: "jfk.wav"\nduration: '00:00:11.000 (11.00s)'\n---\n\nTimestamped transcript content`,
         },
         ctx,
       )) as string;
       expect(autoExtPath).toBe(path.join(tempWorkDir, 'jfk-notes.txt'));
-      expect(fs.existsSync(autoExtPath)).toBe(true);
+      expect(fs.readFileSync(autoExtPath, 'utf8')).toBe(
+        `---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n\nTimestamped transcript content`,
+      );
+
+      // Converts raw transcribe header in content into --- frontmatter block
+      expect(
+        formatTranscriptionWithMetadata({
+          content: `Filename: sample.mp4\nFile type: video/mp4\nDuration: 00:01:05.000 (65.00s)\n\nSpoken video transcript`,
+        }),
+      ).toBe(`---\nsource_file: sample.mp4\nduration: 00:01:05.000 (65.00s)\n---\n\nSpoken video transcript`);
+
+      // Rejects missing metadata when neither arguments nor frontmatter header are provided
+      expect(() =>
+        saveTranscriptionFile({
+          filePath: 'missing-source.txt',
+          content: 'Transcript without metadata',
+          directory: tempWorkDir,
+        }),
+      ).toThrow(/Missing required source file metadata \('sourceFile'\)[\s\S]*Hint:/);
+
+      expect(() =>
+        saveTranscriptionFile({
+          filePath: 'missing-duration.txt',
+          sourceFile: 'jfk.wav',
+          content: 'Transcript without duration',
+          directory: tempWorkDir,
+        }),
+      ).toThrow(/Missing required audio\/video duration metadata \('duration'\)[\s\S]*Hint:/);
+
+      expect(() =>
+        formatTranscriptionWithMetadata({
+          content: `---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n   `,
+        }),
+      ).toThrow(/Missing or empty transcription body in 'content'[\s\S]*Hint:/);
 
       // Rejects overwriting an existing file
       await expect(
         save_transcription.execute(
           {
             filePath: 'jfk-notes.txt',
+            sourceFile: 'jfk.wav',
+            duration: '00:00:11.000 (11.00s)',
             content: 'Modified content',
           },
           ctx,

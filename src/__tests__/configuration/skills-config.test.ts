@@ -63,7 +63,12 @@ describe('configureSkills', () => {
     const parsed = matter(fs.readFileSync(skillPath, 'utf8'));
     expect(parsed.data.name).toBe('audio-video-transcription');
     expect(parsed.data.description).toContain('Audio and video transcription');
+    expect(parsed.data.description).toContain('recording');
+    expect(parsed.data.description).toContain('audio');
+    expect(parsed.data.description).toContain('video');
     expect(parsed.data.description).toContain('transcriber');
     expect(parsed.content).toContain('subagent_type: "transcriber"');
+    expect(parsed.content).toContain('source_file:');
+    expect(parsed.content).toContain('duration:');
   });
 });

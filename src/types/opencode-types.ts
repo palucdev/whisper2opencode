@@ -4,6 +4,8 @@ export interface OpenCodeConfig {
   agent: any;
   command: Record<string, OpenCodeCommand>;
   skills: any;
+  tools?: Record<string, boolean>;
+  permission?: Record<string, any>;
 }
 
 export interface OpenCodeCommand {

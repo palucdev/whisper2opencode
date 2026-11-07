@@ -130,7 +130,7 @@ The agent runs transcription in a single pass, parses the word-level timestamps,
 |---|---|---|
 | `transcribe` | Transcribe audio or video into timestamped words and metadata. | `filePath` (required), `language` (optional, default `'en'`), `modelPath` (optional) |
 | `convert_audio` | Extract or re-encode audio tracks into 16kHz mono `.wav` or `.pcmf32`. | `inputPath` (required), `outputPath`, `format`, `sampleRate`, `channels`, `overwrite` |
-| `save_transcription` | Safely write transcription text to a `.txt` file within the working directory. | `filePath` (required, relative `.txt`), `content` (required) |
+| `save_transcription` | Safely write transcription text (with a leading `---` metadata header for `source_file` and `duration`) to a `.txt` file within the working directory. | `filePath` (required, relative `.txt`), `content` (required), `sourceFile` (optional), `duration` (optional) |
 
 ---
 
