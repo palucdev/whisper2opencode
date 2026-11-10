@@ -70,5 +70,8 @@ describe('configureSkills', () => {
     expect(parsed.content).toContain('subagent_type: "transcriber"');
     expect(parsed.content).toContain('source_file:');
     expect(parsed.content).toContain('duration:');
+    expect(parsed.content).toContain('sequence of timestamped words');
+    expect(parsed.content).toContain('coherent sentences/passages');
+    expect(parsed.content).toContain('saved transcription');
   });
 });

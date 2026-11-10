@@ -31,6 +31,9 @@ describe('configureAgents', () => {
     expect(config.agent.transcriber.permission?.transcribe).toBe('allow');
     expect(config.agent.transcriber.prompt).toContain('source_file:');
     expect(config.agent.transcriber.prompt).toContain('duration:');
+    expect(config.agent.transcriber.prompt).toContain('sequence of timestamped words');
+    expect(config.agent.transcriber.prompt).toContain('coherent sentences/passages');
+    expect(config.agent.transcriber.prompt).toContain('Check the saved transcription file');
   });
 
   test('should preserve existing user-configured tools.transcribe and permission.transcribe settings', () => {

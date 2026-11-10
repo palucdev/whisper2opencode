@@ -44,14 +44,15 @@ This skill enables any main agent or workflow orchestrator to perform local audi
 - **Video Formats (Automatic Audio Track Isolation via `ffmpeg-static`)**: `.mp4`, `.m4v`, `.mkv`, `.mov`, `.webm`, `.avi`, `.ts`, `.mts`, `.m2ts`
 - **Word-Level Timestamps & Metadata**: Extracts filename, media type, total soundtrack duration (`HH:MM:SS.mmm (Xs)`), and word-by-word timestamps (`[HH:MM:SS.mmm --> HH:MM:SS.mmm] word`).
 - **Automatic Container Recovery**: The `transcriber` subagent automatically uses `convert_audio` to normalize incompatible or damaged containers to 16kHz mono if direct transcription fails.
-- **Safe Transcript Persistence & Metadata Header**: When instructed, the `transcriber` subagent uses `save_transcription` to save the transcript to a new `.txt` file inside the current working directory (never overwrites existing files or writes outside the workspace). Every saved `.txt` file begins with a `---`-delimited YAML frontmatter metadata block (`source_file` and `duration`) separated from the transcript body by a blank line so transcript consumers can easily parse or strip it automatically:
+- **Safe Transcript Persistence & Metadata Header**: When instructed, the `transcriber` subagent uses `save_transcription` to save the sequence of timestamped words (`[HH:MM:SS.mmm --> HH:MM:SS.mmm] word`, one per row) to a new `.txt` file inside the current working directory (never overwrites existing files or writes outside the workspace). Every saved `.txt` file begins with a `---`-delimited YAML frontmatter metadata block (`source_file` and `duration`) separated from the timestamped word rows by a blank line so transcript consumers can easily parse or strip it automatically:
   ```text
   ---
   source_file: <filename>
   duration: <HH:MM:SS.mmm (Xs)>
   ---
 
-  <transcript body>
+  [00:00:00.000 --> 00:00:00.320] <word1>
+  [00:00:00.320 --> 00:00:00.640] <word2>
   ```
   Downstream consumers can strip this header automatically with `/^---\r?\n[\s\S]*?\r?\n---\r?\n+/`, `sed '1{/^---$/!q;};1,/^---$/d'`, or `gray-matter`.
 
@@ -85,10 +86,10 @@ Transcribe and analyze the following media file:
 - File Path: <filePath>
 - Language: <language or "en (default)">
 - Custom Model Path: <modelPath or "default">
-- Save Transcription File: <"Yes, save to <relative-path>.txt" or "No">
+- Save Transcription File: <"Yes, save the sequence of timestamped words ([HH:MM:SS.mmm --> HH:MM:SS.mmm] word per row) to <relative-path>.txt" or "No">
 
 ## Requested Analysis
-1. Provide full file metadata (filename, file type, duration) and the reconstructed spoken text.
+1. Provide full file metadata (filename, file type, duration), the reconstructed coherent sentences/passages, and a hint pointing to the saved transcription file for word-level timestamp details.
 2. <Specific analytical instructions: e.g., summarize key decisions, extract action items, answer specific questions>
 3. <Keyword/timestamp instructions: e.g., count occurrences of "<word/phrase>" and list exact [HH:MM:SS.mmm --> HH:MM:SS.mmm] timestamps for every match>
 ```
@@ -97,7 +98,7 @@ Transcribe and analyze the following media file:
 
 Each `transcriber` subagent returns a structured markdown report containing:
 - **File Metadata**: Filename, file type (`audio/*` or `video/*`), soundtrack duration, and saved `.txt` path (if requested).
-- **Transcription**: Complete reconstructed text of the spoken audio.
+- **Transcription**: Reconstructed coherent sentences/passages of the spoken audio, accompanied by a hint to check the saved transcription `.txt` file for full word-level timestamp details (`[HH:MM:SS.mmm --> HH:MM:SS.mmm] word` per row).
 - **Analysis**: Summary and direct answers to the orchestrator's prompt, including word/phrase occurrence counts and exact timestamps.
 - **Timestamped Highlights**: Key moments mapped to `[HH:MM:SS.mmm --> HH:MM:SS.mmm]` intervals.
 

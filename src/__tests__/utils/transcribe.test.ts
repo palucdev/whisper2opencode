@@ -217,13 +217,19 @@ describe('transcribe and save_transcription tools', () => {
     ).rejects.toThrow(/Whisper model path is invalid \(is a directory\):[\s\S]*Hint:/);
   });
 
-  test('save_transcription tool saves new .txt transcription files with metadata header and blocks unsafe operations', async () => {
+  test('save_transcription tool saves new .txt transcription files with metadata header and timestamped words per row, and blocks unsafe or plain-prose content', async () => {
     const tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-save-${process.pid}-`));
     const ctx = createTestContext(tempWorkDir);
 
     try {
-      // Saves a .txt transcription file inside the working directory with delimited metadata header
-      const bodyText = 'And so my fellow Americans, ask not what your country can do for you.';
+      // Saves a .txt transcription file inside the working directory with delimited metadata header and timestamped words per row
+      const bodyText = [
+        '[00:00:00.000 --> 00:00:00.320] And',
+        '[00:00:00.320 --> 00:00:00.640] so',
+        '[00:00:00.640 --> 00:00:00.960] my',
+        '[00:00:00.960 --> 00:00:01.400] fellow',
+        '[00:00:01.400 --> 00:00:02.100] Americans',
+      ].join('\n');
       const savedPath = (await save_transcription.execute(
         {
           filePath: 'transcripts/jfk.transcription.txt',
@@ -248,31 +254,58 @@ describe('transcribe and save_transcription tools', () => {
       });
       expect(parsedMatter.content.trim()).toBe(bodyText);
 
+      // Every row in the stripped body is a timestamped word line
+      for (const row of parsedMatter.content.trim().split('\n')) {
+        expect(row).toMatch(WORD_LINE_REGEX);
+      }
+
       // Automatically appends .txt when no extension is provided and accepts pre-formatted frontmatter in content without duplicating
+      const autoExtBody = '[00:00:03.000 --> 00:00:03.400] ask\n[00:00:03.400 --> 00:00:03.800] not';
       const autoExtPath = (await save_transcription.execute(
         {
           filePath: 'jfk-notes',
-          content: `---\nsource_file: "jfk.wav"\nduration: '00:00:11.000 (11.00s)'\n---\n\nTimestamped transcript content`,
+          content: `---\nsource_file: "jfk.wav"\nduration: '00:00:11.000 (11.00s)'\n---\n\n${autoExtBody}`,
         },
         ctx,
       )) as string;
       expect(autoExtPath).toBe(path.join(tempWorkDir, 'jfk-notes.txt'));
-      expect(fs.readFileSync(autoExtPath, 'utf8')).toBe(
-        `---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n\nTimestamped transcript content`,
-      );
+      expect(fs.readFileSync(autoExtPath, 'utf8')).toBe(`---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n\n${autoExtBody}`);
 
-      // Converts raw transcribe header in content into --- frontmatter block
+      // Converts raw transcribe header in content into --- frontmatter block while preserving timestamped word rows
       expect(
         formatTranscriptionWithMetadata({
-          content: `Filename: sample.mp4\nFile type: video/mp4\nDuration: 00:01:05.000 (65.00s)\n\nSpoken video transcript`,
+          content: `Filename: sample.mp4\nFile type: video/mp4\nDuration: 00:01:05.000 (65.00s)\n\n[00:00:00.000 --> 00:00:00.500] Spoken\n[00:00:00.500 --> 00:00:01.000] video`,
         }),
-      ).toBe(`---\nsource_file: sample.mp4\nduration: 00:01:05.000 (65.00s)\n---\n\nSpoken video transcript`);
+      ).toBe(
+        `---\nsource_file: sample.mp4\nduration: 00:01:05.000 (65.00s)\n---\n\n[00:00:00.000 --> 00:00:00.500] Spoken\n[00:00:00.500 --> 00:00:01.000] video`,
+      );
+
+      // Rejects plain reconstructed sentences or multi-word rows instead of one timestamped word per row
+      expect(() =>
+        saveTranscriptionFile({
+          filePath: 'plain-prose.txt',
+          sourceFile: 'jfk.wav',
+          duration: '00:00:11.000 (11.00s)',
+          content: 'And so my fellow Americans, ask not what your country can do for you.',
+          directory: tempWorkDir,
+        }),
+      ).toThrow(/Invalid transcription body format at line 1[\s\S]*sequence of timestamped words[\s\S]*Hint:/);
+
+      expect(() =>
+        saveTranscriptionFile({
+          filePath: 'multi-word-row.txt',
+          sourceFile: 'jfk.wav',
+          duration: '00:00:11.000 (11.00s)',
+          content: '[00:00:00.000 --> 00:00:02.000] And so my fellow Americans',
+          directory: tempWorkDir,
+        }),
+      ).toThrow(/Invalid transcription body format at line 1[\s\S]*sequence of timestamped words[\s\S]*Hint:/);
 
       // Rejects missing metadata when neither arguments nor frontmatter header are provided
       expect(() =>
         saveTranscriptionFile({
           filePath: 'missing-source.txt',
-          content: 'Transcript without metadata',
+          content: '[00:00:00.000 --> 00:00:00.500] Hello',
           directory: tempWorkDir,
         }),
       ).toThrow(/Missing required source file metadata \('sourceFile'\)[\s\S]*Hint:/);
@@ -281,7 +314,7 @@ describe('transcribe and save_transcription tools', () => {
         saveTranscriptionFile({
           filePath: 'missing-duration.txt',
           sourceFile: 'jfk.wav',
-          content: 'Transcript without duration',
+          content: '[00:00:00.000 --> 00:00:00.500] Hello',
           directory: tempWorkDir,
         }),
       ).toThrow(/Missing required audio\/video duration metadata \('duration'\)[\s\S]*Hint:/);
@@ -299,7 +332,7 @@ describe('transcribe and save_transcription tools', () => {
             filePath: 'jfk-notes.txt',
             sourceFile: 'jfk.wav',
             duration: '00:00:11.000 (11.00s)',
-            content: 'Modified content',
+            content: '[00:00:00.000 --> 00:00:00.500] Modified',
           },
           ctx,
         ),

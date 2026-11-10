@@ -13,6 +13,9 @@ describe('configureCommands', () => {
     expect(config.command.transcribe).toBeDefined();
     expect(config.command.transcribe!.description).toContain('Transcribe an audio or video file');
     expect(config.command.transcribe!.template).toContain('"$ARGUMENTS"');
+    expect(config.command.transcribe!.template).toContain('sequence of timestamped words');
+    expect(config.command.transcribe!.template).toContain('coherent sentences/passages');
+    expect(config.command.transcribe!.template).toContain('hint to check the saved transcription file');
   });
 
   test('should safely handle null/undefined config without throwing', () => {

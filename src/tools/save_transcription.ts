@@ -3,7 +3,7 @@ import { saveTranscriptionFile } from '../utils/transcribe.js';
 
 export const save_transcription = tool({
   description:
-    'Save a transcription text file (.txt) to the filesystem within the current working directory. Prepends a YAML frontmatter metadata header (--- source_file and duration ---) at the beginning of the file, clearly separated from the transcript body by a blank line so transcript consumers can easily parse or strip it automatically. Only creates new .txt files inside the working directory; never overwrites or modifies existing files, deletes files, or creates non-.txt files.',
+    'Save a transcription text file (.txt) to the filesystem within the current working directory. Prepends a YAML frontmatter metadata header (--- source_file and duration ---) at the beginning of the file, clearly separated by a blank line from the sequence of timestamped words ([HH:MM:SS.mmm --> HH:MM:SS.mmm] word, one word per row) so transcript consumers can easily parse or strip it automatically. Only creates new .txt files inside the working directory; never overwrites or modifies existing files, deletes files, or creates non-.txt files.',
   args: {
     filePath: tool.schema
       .string()
@@ -25,7 +25,7 @@ export const save_transcription = tool({
     content: tool.schema
       .string()
       .describe(
-        'Non-empty transcription text content to save to the .txt file. May be plain transcript body text (when sourceFile and duration are provided) or already include the leading --- metadata --- header block.',
+        'Non-empty sequence of timestamped words to save to the .txt file, with one "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" entry per row (as returned by the transcribe tool). May also include the leading --- metadata --- header block or raw transcribe header.',
       ),
   },
   async execute(args, context) {

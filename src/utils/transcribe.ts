@@ -16,6 +16,7 @@ const require = createRequire(import.meta.url);
 const DEFAULT_MODEL_NAME = 'ggml-base.en.bin';
 const DEFAULT_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${DEFAULT_MODEL_NAME}`;
 const SEGMENT_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
+export const TIMESTAMPED_WORD_LINE_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(\S+)$/;
 export const TRANSCRIPTION_METADATA_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n*/;
 const RAW_METADATA_HEADER_REGEX =
   /^(?:Filename|Source file|source_file):\s*(.+)\r?\n(?:File type:\s*.+\r?\n)?(?:Duration|duration):\s*(.+)(?:\r?\n)+/i;
@@ -236,9 +237,14 @@ export function stripTranscriptionMetadata(content: string): string {
 
 export function formatTranscriptionWithMetadata(options: { content: string; sourceFile?: string; duration?: string }): string {
   const extracted = extractMetadataAndBody(options.content);
-  if (!extracted.body) {
+  const rawLines = extracted.body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (rawLines.length === 0) {
     throw new Error(
-      "Missing or empty transcription body in 'content'. Hint: Provide non-empty spoken transcript text in addition to the metadata header.",
+      "Missing or empty transcription body in 'content'. Hint: Provide non-empty timestamped word lines in addition to the metadata header.",
     );
   }
 
@@ -256,8 +262,20 @@ export function formatTranscriptionWithMetadata(options: { content: string; sour
     );
   }
 
+  const normalizedWordLines: string[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i]!;
+    const match = TIMESTAMPED_WORD_LINE_REGEX.exec(line);
+    if (!match?.[1] || !match[2] || !match[3]) {
+      throw new Error(
+        `Invalid transcription body format at line ${i + 1}: "${line}". Saved transcriptions must be a sequence of timestamped words with one "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" entry per row. Hint: Pass the exact "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" lines from the 'transcribe' tool output instead of reconstructed sentences or plain prose.`,
+      );
+    }
+    normalizedWordLines.push(`[${match[1]} --> ${match[2]}] ${match[3]}`);
+  }
+
   const resolvedSourceFile = path.basename(rawSourceFile);
-  return `---\nsource_file: ${resolvedSourceFile}\nduration: ${resolvedDuration}\n---\n\n${extracted.body}`;
+  return `---\nsource_file: ${resolvedSourceFile}\nduration: ${resolvedDuration}\n---\n\n${normalizedWordLines.join('\n')}`;
 }
 
 export function saveTranscriptionFile(options: SaveTranscriptionOptions): string {
