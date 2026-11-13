@@ -1,10 +1,42 @@
-import { describe, expect, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import matter from 'gray-matter';
+
+import '../mock-ffmpeg.js';
+
+const mockWhisperState = {
+  failInit: false,
+  failFullDefault: false,
+};
+
+mock.module('whisper.cpp', () => {
+  const factory = (options: { print: (text: string) => void; printErr: (text: string) => void }) => {
+    return Promise.resolve({
+      FS_createDataFile: () => {},
+      init: () => {
+        if (mockWhisperState.failInit) return false;
+        return true;
+      },
+      full_default: () => {
+        if (mockWhisperState.failFullDefault) {
+          options.printErr('mock whisper execution failed');
+          return 1;
+        }
+        options.print('[00:00:00.000 --> 00:00:00.500] And so my fellow Americans');
+        options.print('[00:00:00.500 --> 00:00:01.000] ask not what you can do for your country ask what you can do for your country');
+        return 0;
+      },
+      free: () => {},
+      PThread: { terminateAllThreads: () => {} },
+    });
+  };
+  return {
+    default: factory,
+    __esModule: true,
+  };
+});
 
 import { save_transcription } from '../../tools/save_transcription.js';
 import { transcribe } from '../../tools/transcribe.js';
@@ -15,24 +47,31 @@ import {
   stripTranscriptionMetadata,
   transcribeAudioFile,
 } from '../../utils/transcribe.js';
+import { MOCK_AUDIO_PATH, MOCK_MODEL_PATH, MOCK_VIDEO_PATH, createTestContext } from '../fixtures.js';
 
-const require = createRequire(import.meta.url);
-const ffmpegPath = require('ffmpeg-static') as string;
-
-function createTestContext(dir = '/home/projekty/whisper2opencode') {
-  return {
-    sessionID: 'test-session',
-    messageID: 'test-msg',
-    agent: 'build',
-    directory: dir,
-    worktree: dir,
-    abort: new AbortController().signal,
-    metadata() {},
-    async ask() {},
-  } as any;
-}
-
+/**
+ * Matches a single timestamped word line from transcribe tool output.
+ *
+ * Example:
+ *   "[00:00:00.000 --> 00:00:00.500] And"
+ *
+ * Captures:
+ *   - match[1]: Start timestamp ("00:00:00.000")
+ *   - match[2]: End timestamp ("00:00:00.500")
+ *   - match[3]: Spoken word ("And")
+ */
 const WORD_LINE_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\] (.+)$/;
+
+/**
+ * Matches formatted audio/video duration strings with timestamp and seconds in parentheses.
+ *
+ * Example:
+ *   "00:00:11.000 (11.00s)"
+ *
+ * Captures:
+ *   - match[1]: Duration timestamp ("00:00:11.000")
+ *   - match[2]: Duration seconds ("11.00")
+ */
 const DURATION_REGEX = /^(\d{2}:\d{2}:\d{2}\.\d{3}) \((\d+(?:\.\d+)?)s\)$/;
 
 function parseTranscriptionOutput(output: string) {
@@ -77,19 +116,19 @@ describe('transcribe and save_transcription tools', () => {
   test('transcribe tool returns file metadata and a timestamped list of spoken words', async () => {
     const output = (await transcribe.execute(
       {
-        filePath: '/tmp/opencode/jfk.wav',
+        filePath: MOCK_AUDIO_PATH,
         language: 'en',
-        modelPath: '/tmp/opencode/ggml-tiny.en.bin',
+        modelPath: MOCK_MODEL_PATH,
       },
       createTestContext(),
     )) as string;
 
     expect(typeof output).toBe('string');
     const { metadata, words: entries } = parseTranscriptionOutput(output);
-    expect(metadata.filename).toBe('jfk.wav');
+    expect(metadata.filename).toBe(path.basename(MOCK_AUDIO_PATH));
     expect(metadata.fileType).toBe('audio/wav');
-    expect(metadata.durationTimestamp).toBe('00:00:11.000');
-    expect(metadata.durationSeconds).toBe(11);
+    expect(metadata.durationTimestamp).toBe('00:00:01.000');
+    expect(metadata.durationSeconds).toBe(1);
 
     const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(' ');
     expect(reconstructedText).toContain('fellow americans');
@@ -101,56 +140,25 @@ describe('transcribe and save_transcription tools', () => {
   }, 30_000);
 
   test('transcribe tool isolates audio from video files and transcribes into metadata and timestamped words', async () => {
-    const videoPath = path.join(os.tmpdir(), `whisper2opencode-test-video-${process.pid}.mp4`);
+    const output = (await transcribe.execute(
+      {
+        filePath: MOCK_VIDEO_PATH,
+        language: 'en',
+        modelPath: MOCK_MODEL_PATH,
+      },
+      createTestContext(),
+    )) as string;
 
-    try {
-      execFileSync(
-        ffmpegPath,
-        [
-          '-hide_banner',
-          '-loglevel',
-          'error',
-          '-y',
-          '-f',
-          'lavfi',
-          '-i',
-          'color=c=black:s=160x120:r=5',
-          '-i',
-          '/tmp/opencode/jfk.wav',
-          '-shortest',
-          '-c:v',
-          'mpeg4',
-          '-c:a',
-          'aac',
-          videoPath,
-        ],
-        { stdio: ['ignore', 'pipe', 'pipe'] },
-      );
+    expect(typeof output).toBe('string');
+    const { metadata, words: entries } = parseTranscriptionOutput(output);
+    expect(metadata.filename).toBe(path.basename(MOCK_VIDEO_PATH));
+    expect(metadata.fileType).toBe('video/mp4');
+    expect(metadata.durationSeconds).toBeGreaterThanOrEqual(1.0);
+    expect(metadata.durationSeconds).toBeLessThanOrEqual(1.1);
 
-      const output = (await transcribe.execute(
-        {
-          filePath: videoPath,
-          language: 'en',
-          modelPath: '/tmp/opencode/ggml-tiny.en.bin',
-        },
-        createTestContext(),
-      )) as string;
-
-      expect(typeof output).toBe('string');
-      const { metadata, words: entries } = parseTranscriptionOutput(output);
-      expect(metadata.filename).toBe(path.basename(videoPath));
-      expect(metadata.fileType).toBe('video/mp4');
-      expect(metadata.durationSeconds).toBeGreaterThanOrEqual(10.9);
-      expect(metadata.durationSeconds).toBeLessThanOrEqual(11.2);
-
-      const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(' ');
-      expect(reconstructedText).toContain('fellow americans');
-      expect(reconstructedText).toContain('what you can do for your country');
-    } finally {
-      if (fs.existsSync(videoPath)) {
-        fs.unlinkSync(videoPath);
-      }
-    }
+    const reconstructedText = entries.map((e) => e.word.toLowerCase()).join(' ');
+    expect(reconstructedText).toContain('fellow americans');
+    expect(reconstructedText).toContain('what you can do for your country');
   }, 30_000);
 
   test('transcribe tool caches transcription results for unchanged files', async () => {
@@ -158,9 +166,9 @@ describe('transcribe and save_transcription tools', () => {
 
     const first = await transcribe.execute(
       {
-        filePath: '/tmp/opencode/jfk.wav',
+        filePath: MOCK_AUDIO_PATH,
         language: 'en',
-        modelPath: '/tmp/opencode/ggml-tiny.en.bin',
+        modelPath: MOCK_MODEL_PATH,
       },
       ctx,
     );
@@ -168,9 +176,9 @@ describe('transcribe and save_transcription tools', () => {
     const start = performance.now();
     const second = await transcribe.execute(
       {
-        filePath: '/tmp/opencode/jfk.wav',
+        filePath: MOCK_AUDIO_PATH,
         language: 'en',
-        modelPath: '/tmp/opencode/ggml-tiny.en.bin',
+        modelPath: MOCK_MODEL_PATH,
       },
       ctx,
     );
@@ -181,45 +189,177 @@ describe('transcribe and save_transcription tools', () => {
   }, 30_000);
 
   test('transcribe tool provides actionable recovery hints on media and model errors', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-hints-${process.pid}-`));
+    const ctx = createTestContext(tempDir);
+
+    try {
+      // Missing audio/video file
+      const missingMedia = path.join(tempDir, 'does-not-exist.mp3');
+      await expect(
+        transcribe.execute(
+          {
+            filePath: missingMedia,
+            modelPath: MOCK_MODEL_PATH,
+          },
+          ctx,
+        ),
+      ).rejects.toThrow(/Audio\/video file not found:[\s\S]*Hint:/);
+
+      // Missing custom model file
+      const missingModel = path.join(tempDir, 'missing-model.bin');
+      await expect(
+        transcribe.execute(
+          {
+            filePath: MOCK_AUDIO_PATH,
+            modelPath: missingModel,
+          },
+          ctx,
+        ),
+      ).rejects.toThrow(/Whisper model file not found at:[\s\S]*Hint:/);
+
+      // Directory passed as modelPath
+      await expect(
+        transcribe.execute(
+          {
+            filePath: MOCK_AUDIO_PATH,
+            modelPath: tempDir,
+          },
+          ctx,
+        ),
+      ).rejects.toThrow(/Whisper model path is invalid \(is a directory\):[\s\S]*Hint:/);
+
+      // Empty file passed as modelPath
+      const emptyModel = path.join(tempDir, 'empty-model.bin');
+      fs.writeFileSync(emptyModel, '');
+      await expect(
+        transcribe.execute(
+          {
+            filePath: MOCK_AUDIO_PATH,
+            modelPath: emptyModel,
+          },
+          ctx,
+        ),
+      ).rejects.toThrow(/Whisper model path is invalid \(file is empty\):[\s\S]*Hint:/);
+
+      // Model initialization failure
+      const failInitAudio = path.join(tempDir, 'fail-init.wav');
+      fs.copyFileSync(MOCK_AUDIO_PATH, failInitAudio);
+      mockWhisperState.failInit = true;
+      try {
+        await expect(
+          transcribe.execute(
+            {
+              filePath: failInitAudio,
+              modelPath: MOCK_MODEL_PATH,
+            },
+            ctx,
+          ),
+        ).rejects.toThrow(/whisper\.cpp failed to initialize model[\s\S]*Hint:/);
+      } finally {
+        mockWhisperState.failInit = false;
+      }
+
+      // Model execution failure
+      const failExecAudio = path.join(tempDir, 'fail-exec.wav');
+      fs.copyFileSync(MOCK_AUDIO_PATH, failExecAudio);
+      mockWhisperState.failFullDefault = true;
+      try {
+        await expect(
+          transcribe.execute(
+            {
+              filePath: failExecAudio,
+              modelPath: MOCK_MODEL_PATH,
+            },
+            ctx,
+          ),
+        ).rejects.toThrow(/whisper\.cpp transcription failed with code 1[\s\S]*Hint:/);
+      } finally {
+        mockWhisperState.failFullDefault = false;
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('transcribe tool downloads and caches default model when modelPath is omitted with network and HTTP recovery hints', async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-home-${process.pid}-`));
+    const homedirSpy = spyOn(os, 'homedir').mockReturnValue(tempHome);
     const ctx = createTestContext();
 
-    // Missing audio/video file
-    await expect(
-      transcribe.execute(
-        {
-          filePath: '/tmp/opencode/does-not-exist.mp3',
-          modelPath: '/tmp/opencode/ggml-tiny.en.bin',
-        },
-        ctx,
-      ),
-    ).rejects.toThrow(/Audio\/video file not found:[\s\S]*Hint:/);
+    const originalFetch = globalThis.fetch;
+    try {
+      // 1. Network failure
+      globalThis.fetch = () => Promise.reject(new Error('Connection timed out'));
+      await expect(
+        transcribe.execute(
+          {
+            filePath: MOCK_AUDIO_PATH,
+            language: 'en',
+          },
+          ctx,
+        ),
+      ).rejects.toThrow(/Failed to download default model from[\s\S]*Connection timed out[\s\S]*Hint:/);
 
-    // Missing custom model file
-    await expect(
-      transcribe.execute(
-        {
-          filePath: '/tmp/opencode/jfk.wav',
-          modelPath: '/tmp/opencode/missing-model.bin',
-        },
-        ctx,
-      ),
-    ).rejects.toThrow(/Whisper model file not found at:[\s\S]*Hint:/);
+      // 2. HTTP error response (!response.ok)
+      globalThis.fetch = () =>
+        Promise.resolve({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+        } as Response);
+      await expect(
+        transcribe.execute(
+          {
+            filePath: MOCK_AUDIO_PATH,
+            language: 'en',
+          },
+          ctx,
+        ),
+      ).rejects.toThrow(/Failed to download default model \(503 Service Unavailable\)[\s\S]*Hint:/);
 
-    // Directory passed as modelPath
-    await expect(
-      transcribe.execute(
+      // 3. Successful download and caching
+      let fetchCallCount = 0;
+      globalThis.fetch = () => {
+        fetchCallCount++;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          arrayBuffer: () => Promise.resolve(Buffer.from('ggml-downloaded-model-content')),
+        } as Response);
+      };
+
+      const result1 = (await transcribe.execute(
         {
-          filePath: '/tmp/opencode/jfk.wav',
-          modelPath: '/tmp/opencode',
+          filePath: MOCK_AUDIO_PATH,
+          language: 'en',
         },
         ctx,
-      ),
-    ).rejects.toThrow(/Whisper model path is invalid \(is a directory\):[\s\S]*Hint:/);
+      )) as string;
+      expect(typeof result1).toBe('string');
+      expect(fetchCallCount).toBe(1);
+
+      // 4. Cache hit - reuses downloaded model without calling fetch again
+      const result2 = (await transcribe.execute(
+        {
+          filePath: MOCK_AUDIO_PATH,
+          language: 'en',
+        },
+        ctx,
+      )) as string;
+      expect(result2).toBe(result1);
+      expect(fetchCallCount).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      homedirSpy.mockRestore();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 
   test('save_transcription tool saves new .txt transcription files with metadata header and timestamped words per row, and blocks unsafe or plain-prose content', async () => {
     const tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-save-${process.pid}-`));
     const ctx = createTestContext(tempWorkDir);
+    const audioBasename = path.basename(MOCK_AUDIO_PATH);
 
     try {
       // Saves a .txt transcription file inside the working directory with delimited metadata header and timestamped words per row
@@ -232,25 +372,25 @@ describe('transcribe and save_transcription tools', () => {
       ].join('\n');
       const savedPath = (await save_transcription.execute(
         {
-          filePath: 'transcripts/jfk.transcription.txt',
-          sourceFile: '/tmp/opencode/jfk.wav',
-          duration: '00:00:11.000 (11.00s)',
+          filePath: 'transcripts/test.transcription.txt',
+          sourceFile: MOCK_AUDIO_PATH,
+          duration: '00:00:01.000 (1.00s)',
           content: bodyText,
         },
         ctx,
       )) as string;
 
-      expect(savedPath).toBe(path.join(tempWorkDir, 'transcripts', 'jfk.transcription.txt'));
+      expect(savedPath).toBe(path.join(tempWorkDir, 'transcripts', 'test.transcription.txt'));
       const savedContent = fs.readFileSync(savedPath, 'utf8');
-      expect(savedContent).toBe(`---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n\n${bodyText}`);
+      expect(savedContent).toBe(`---\nsource_file: ${audioBasename}\nduration: 00:00:01.000 (1.00s)\n---\n\n${bodyText}`);
 
       // Metadata is differentiated from body and easy to clean up automatically (regex, helper, and gray-matter)
       expect(stripTranscriptionMetadata(savedContent)).toBe(bodyText);
       expect(savedContent.replace(TRANSCRIPTION_METADATA_REGEX, '')).toBe(bodyText);
       const parsedMatter = matter(savedContent);
       expect(parsedMatter.data).toEqual({
-        source_file: 'jfk.wav',
-        duration: '00:00:11.000 (11.00s)',
+        source_file: audioBasename,
+        duration: '00:00:01.000 (1.00s)',
       });
       expect(parsedMatter.content.trim()).toBe(bodyText);
 
@@ -263,13 +403,13 @@ describe('transcribe and save_transcription tools', () => {
       const autoExtBody = '[00:00:03.000 --> 00:00:03.400] ask\n[00:00:03.400 --> 00:00:03.800] not';
       const autoExtPath = (await save_transcription.execute(
         {
-          filePath: 'jfk-notes',
-          content: `---\nsource_file: "jfk.wav"\nduration: '00:00:11.000 (11.00s)'\n---\n\n${autoExtBody}`,
+          filePath: 'mock-notes',
+          content: `---\nsource_file: "${audioBasename}"\nduration: '00:00:01.000 (1.00s)'\n---\n\n${autoExtBody}`,
         },
         ctx,
       )) as string;
-      expect(autoExtPath).toBe(path.join(tempWorkDir, 'jfk-notes.txt'));
-      expect(fs.readFileSync(autoExtPath, 'utf8')).toBe(`---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n\n${autoExtBody}`);
+      expect(autoExtPath).toBe(path.join(tempWorkDir, 'mock-notes.txt'));
+      expect(fs.readFileSync(autoExtPath, 'utf8')).toBe(`---\nsource_file: ${audioBasename}\nduration: 00:00:01.000 (1.00s)\n---\n\n${autoExtBody}`);
 
       // Converts raw transcribe header in content into --- frontmatter block while preserving timestamped word rows
       expect(
@@ -284,8 +424,8 @@ describe('transcribe and save_transcription tools', () => {
       expect(() =>
         saveTranscriptionFile({
           filePath: 'plain-prose.txt',
-          sourceFile: 'jfk.wav',
-          duration: '00:00:11.000 (11.00s)',
+          sourceFile: audioBasename,
+          duration: '00:00:01.000 (1.00s)',
           content: 'And so my fellow Americans, ask not what your country can do for you.',
           directory: tempWorkDir,
         }),
@@ -294,8 +434,8 @@ describe('transcribe and save_transcription tools', () => {
       expect(() =>
         saveTranscriptionFile({
           filePath: 'multi-word-row.txt',
-          sourceFile: 'jfk.wav',
-          duration: '00:00:11.000 (11.00s)',
+          sourceFile: audioBasename,
+          duration: '00:00:01.000 (1.00s)',
           content: '[00:00:00.000 --> 00:00:02.000] And so my fellow Americans',
           directory: tempWorkDir,
         }),
@@ -313,7 +453,7 @@ describe('transcribe and save_transcription tools', () => {
       expect(() =>
         saveTranscriptionFile({
           filePath: 'missing-duration.txt',
-          sourceFile: 'jfk.wav',
+          sourceFile: audioBasename,
           content: '[00:00:00.000 --> 00:00:00.500] Hello',
           directory: tempWorkDir,
         }),
@@ -321,7 +461,7 @@ describe('transcribe and save_transcription tools', () => {
 
       expect(() =>
         formatTranscriptionWithMetadata({
-          content: `---\nsource_file: jfk.wav\nduration: 00:00:11.000 (11.00s)\n---\n   `,
+          content: `---\nsource_file: ${audioBasename}\nduration: 00:00:01.000 (1.00s)\n---\n   `,
         }),
       ).toThrow(/Missing or empty transcription body in 'content'[\s\S]*Hint:/);
 
@@ -329,9 +469,9 @@ describe('transcribe and save_transcription tools', () => {
       await expect(
         save_transcription.execute(
           {
-            filePath: 'jfk-notes.txt',
-            sourceFile: 'jfk.wav',
-            duration: '00:00:11.000 (11.00s)',
+            filePath: 'mock-notes.txt',
+            sourceFile: audioBasename,
+            duration: '00:00:01.000 (1.00s)',
             content: '[00:00:00.000 --> 00:00:00.500] Modified',
           },
           ctx,
@@ -357,9 +497,10 @@ describe('transcribe and save_transcription tools', () => {
       ).toThrow(/outside the working directory[\s\S]*Hint:/);
 
       // Rejects absolute paths outside the working directory
+      const outsideWorkDir = path.resolve(tempWorkDir, '..', `outside-work-dir-${process.pid}.txt`);
       expect(() =>
         saveTranscriptionFile({
-          filePath: '/tmp/outside-work-dir.txt',
+          filePath: outsideWorkDir,
           content: 'escaped',
           directory: tempWorkDir,
         }),

@@ -15,9 +15,59 @@ const require = createRequire(import.meta.url);
 
 const DEFAULT_MODEL_NAME = 'ggml-base.en.bin';
 const DEFAULT_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${DEFAULT_MODEL_NAME}`;
+
+/**
+ * Matches whisper.cpp stdout segment lines containing start/end timestamps and transcribed text.
+ *
+ * Example:
+ *   "[00:00:00.000 --> 00:00:05.120] And so my fellow Americans"
+ *
+ * Captures:
+ *   - match[1]: Start timestamp ("00:00:00.000")
+ *   - match[2]: End timestamp ("00:00:05.120")
+ *   - match[3]: Transcribed segment text ("And so my fellow Americans")
+ */
 const SEGMENT_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
+
+/**
+ * Matches a single timestamped word entry in transcription body content.
+ *
+ * Example:
+ *   "[00:00:00.000 --> 00:00:00.120] And"
+ *
+ * Captures:
+ *   - match[1]: Start timestamp ("00:00:00.000")
+ *   - match[2]: End timestamp ("00:00:00.120")
+ *   - match[3]: Non-whitespace word token ("And")
+ */
 export const TIMESTAMPED_WORD_LINE_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(\S+)$/;
+
+/**
+ * Matches the leading YAML frontmatter metadata block delimited by `---` in transcription text files.
+ *
+ * Example:
+ *   ---
+ *   source_file: interview.wav
+ *   duration: 00:01:23.456 (83.46s)
+ *   ---
+ *
+ * Captures:
+ *   - match[1]: YAML metadata content block ("source_file: interview.wav\nduration: 00:01:23.456 (83.46s)")
+ */
 export const TRANSCRIPTION_METADATA_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n*/;
+
+/**
+ * Matches raw plain-text metadata headers produced by the transcribe tool or legacy formats.
+ *
+ * Example:
+ *   Filename: interview.wav
+ *   File type: audio/wav
+ *   Duration: 00:01:23.456 (83.46s)
+ *
+ * Captures:
+ *   - match[1]: Source filename ("interview.wav")
+ *   - match[2]: Duration string ("00:01:23.456 (83.46s)")
+ */
 const RAW_METADATA_HEADER_REGEX =
   /^(?:Filename|Source file|source_file):\s*(.+)\r?\n(?:File type:\s*.+\r?\n)?(?:Duration|duration):\s*(.+)(?:\r?\n)+/i;
 
@@ -300,7 +350,7 @@ export function saveTranscriptionFile(options: SaveTranscriptionOptions): string
     );
   }
 
-  const segments = relativeToBase.split(path.sep);
+  const segments = relativeToBase.split(/[/\\]/);
   if (segments.some((seg) => seg.startsWith('.'))) {
     throw new Error(
       `Output path "${candidatePath}" cannot target hidden files or directories. Hint: Provide a standard '.txt' filename inside the working directory.`,

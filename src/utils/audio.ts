@@ -68,8 +68,14 @@ export function resolveMediaFile(
   return { resolvedPath, stat };
 }
 
-function getFfmpegBinary(): string {
-  const ffmpegPath = require('ffmpeg-static') as string | null;
+export function getFfmpegBinary(overridePath?: unknown): string {
+  const ffmpegRaw = overridePath !== undefined ? overridePath : (process.env.FFMPEG_PATH ?? (require('ffmpeg-static') as unknown));
+  const ffmpegPath =
+    typeof ffmpegRaw === 'string' && ffmpegRaw.trim()
+      ? ffmpegRaw.trim()
+      : ffmpegRaw && typeof ffmpegRaw === 'object' && 'default' in ffmpegRaw && typeof (ffmpegRaw as { default: unknown }).default === 'string'
+        ? (ffmpegRaw as { default: string }).default.trim()
+        : null;
   if (!ffmpegPath) {
     throw new Error(
       "ffmpeg-static binary is not available for this platform. Hint: Convert the input file to raw 16kHz mono 32-bit float PCM (.pcmf32) externally and pass the .pcmf32 file to 'transcribe'.",
@@ -89,10 +95,20 @@ function formatFfmpegStderr(err: unknown): { raw: string; detail: string } {
   return { raw, detail };
 }
 
+function isSamePath(path1: string, path2: string): boolean {
+  const p1 = path.resolve(path1);
+  const p2 = path.resolve(path2);
+  return process.platform === 'win32' ? p1.toLowerCase() === p2.toLowerCase() : p1 === p2;
+}
+
 export function decodeAudioToFloat32(mediaPath: string): Float32Array {
-  if (mediaPath.endsWith('.pcmf32')) {
+  if (mediaPath.toLowerCase().endsWith('.pcmf32')) {
     const raw = fs.readFileSync(mediaPath);
-    const samples = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4));
+    const sampleCount = Math.floor(raw.byteLength / 4);
+    const samples =
+      raw.byteOffset % 4 === 0
+        ? new Float32Array(raw.buffer, raw.byteOffset, sampleCount)
+        : new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + sampleCount * 4));
     if (samples.length === 0) {
       throw new Error(
         `Decoded audio from "${mediaPath}" contains 0 samples. Hint: The .pcmf32 file is empty or smaller than 4 bytes. Regenerate the file as 16kHz mono 32-bit float PCM or pass the original audio/video file.`,
@@ -151,7 +167,11 @@ export function decodeAudioToFloat32(mediaPath: string): Float32Array {
     );
   }
 
-  const samples = new Float32Array(pcmBuffer.buffer, pcmBuffer.byteOffset, Math.floor(pcmBuffer.byteLength / 4));
+  const sampleCount = Math.floor(pcmBuffer.byteLength / 4);
+  const samples =
+    pcmBuffer.byteOffset % 4 === 0
+      ? new Float32Array(pcmBuffer.buffer, pcmBuffer.byteOffset, sampleCount)
+      : new Float32Array(pcmBuffer.buffer.slice(pcmBuffer.byteOffset, pcmBuffer.byteOffset + sampleCount * 4));
   if (samples.length === 0) {
     throw new Error(
       `Decoded audio from "${mediaPath}" contains 0 samples. Hint: The audio stream is empty or has zero duration. Check the source file or convert it to a valid 16kHz mono .wav file.`,
@@ -175,11 +195,10 @@ export function convertAudioFile(options: ConvertAudioOptions): string {
   } else {
     const parsed = path.parse(resolvedInputPath);
     const candidate = path.join(parsed.dir, `${parsed.name}.${targetFormat}`);
-    resolvedOutputPath =
-      path.resolve(candidate) === path.resolve(resolvedInputPath) ? path.join(parsed.dir, `${parsed.name}.converted.${targetFormat}`) : candidate;
+    resolvedOutputPath = isSamePath(candidate, resolvedInputPath) ? path.join(parsed.dir, `${parsed.name}.converted.${targetFormat}`) : candidate;
   }
 
-  if (path.resolve(resolvedOutputPath) === path.resolve(resolvedInputPath)) {
+  if (isSamePath(resolvedOutputPath, resolvedInputPath)) {
     throw new Error(
       `Output path "${resolvedOutputPath}" cannot be the same as input path. Hint: Provide a distinct 'outputPath' or omit 'outputPath' so a separate converted file is created.`,
     );
