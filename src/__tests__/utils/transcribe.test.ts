@@ -43,6 +43,7 @@ import { transcribe } from '../../tools/transcribe.js';
 import {
   TRANSCRIPTION_METADATA_REGEX,
   formatTranscriptionWithMetadata,
+  loadWhisperFactory,
   saveTranscriptionFile,
   stripTranscriptionMetadata,
   transcribeAudioFile,
@@ -278,6 +279,89 @@ describe('transcribe and save_transcription tools', () => {
       }
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('loadWhisperFactory loads factory or throws descriptive environment setup hints for whisper.cpp and models', () => {
+    // 1. Loads mocked factory successfully
+    const factory = loadWhisperFactory();
+    expect(typeof factory).toBe('function');
+
+    // 2. Accepts valid factory function override
+    const customFactory = () => Promise.resolve({} as any);
+    expect(loadWhisperFactory(customFactory)).toBe(customFactory as any);
+
+    // 3. Throws descriptive error when override is invalid
+    expect(() => loadWhisperFactory(null)).toThrow(
+      /Package 'whisper\.cpp' is required for transcription[\s\S]*download_whisper_cpp[\s\S]*bun add whisper\.cpp[\s\S]*npm install whisper\.cpp[\s\S]*ggml-base\.en\.bin[\s\S]*ggml-base\.bin[\s\S]*WHISPER_MODEL_PATH/,
+    );
+
+    // 4. Throws descriptive error when module loader fails and points to download_whisper_cpp tool
+    expect(() =>
+      loadWhisperFactory(undefined, () => {
+        throw new Error('cannot find module');
+      }),
+    ).toThrow(/Package 'whisper\.cpp' is required for transcription[\s\S]*Hint:[\s\S]*download_whisper_cpp/);
+
+    // 5. Throws descriptive error when module loader returns non-function
+    expect(() => loadWhisperFactory(undefined, () => ({ notAFunction: true }))).toThrow(
+      /Package 'whisper\.cpp' is required for transcription[\s\S]*Hint:[\s\S]*download_whisper_cpp/,
+    );
+
+    // 6. Resolves factory from targetDir when local module exists
+    const tempProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-local-pkg-${process.pid}-`));
+    try {
+      const mockWhisperDir = path.join(tempProjectDir, 'node_modules', 'whisper.cpp');
+      fs.mkdirSync(mockWhisperDir, { recursive: true });
+      fs.writeFileSync(path.join(mockWhisperDir, 'package.json'), JSON.stringify({ name: 'whisper.cpp', main: 'index.js' }));
+      fs.writeFileSync(path.join(mockWhisperDir, 'index.js'), 'module.exports = function() { return Promise.resolve({ init: () => true }); };');
+
+      const localFactory = loadWhisperFactory(
+        undefined,
+        () => {
+          throw new Error('not in global');
+        },
+        tempProjectDir,
+      );
+      expect(typeof localFactory).toBe('function');
+
+      // 7. Falls through to error when targetDir localRequire throws
+      const completelyEmptyDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-empty-test-${process.pid}-`));
+      try {
+        expect(() =>
+          loadWhisperFactory(
+            undefined,
+            () => {
+              throw new Error('not in global');
+            },
+            completelyEmptyDir,
+          ),
+        ).toThrow(/Package 'whisper\.cpp' is required for transcription/);
+      } finally {
+        fs.rmSync(completelyEmptyDir, { recursive: true, force: true });
+      }
+
+      // 8. Falls through to error when targetDir localRequire returns non-function
+      const invalidModDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-invalid-test-${process.pid}-`));
+      try {
+        const invalidWhisperDir = path.join(invalidModDir, 'node_modules', 'whisper.cpp');
+        fs.mkdirSync(invalidWhisperDir, { recursive: true });
+        fs.writeFileSync(path.join(invalidWhisperDir, 'package.json'), JSON.stringify({ name: 'whisper.cpp', main: 'index.js' }));
+        fs.writeFileSync(path.join(invalidWhisperDir, 'index.js'), 'module.exports = "not-a-func";');
+        expect(() =>
+          loadWhisperFactory(
+            undefined,
+            () => {
+              throw new Error('not in global');
+            },
+            invalidModDir,
+          ),
+        ).toThrow(/Package 'whisper\.cpp' is required for transcription/);
+      } finally {
+        fs.rmSync(invalidModDir, { recursive: true, force: true });
+      }
+    } finally {
+      fs.rmSync(tempProjectDir, { recursive: true, force: true });
     }
   });
 

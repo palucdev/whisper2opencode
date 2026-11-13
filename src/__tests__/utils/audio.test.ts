@@ -41,8 +41,19 @@ describe('audio utilities and convert_audio tool', () => {
     expect(bin).toBe('/mock/bin/ffmpeg');
 
     expect(getFfmpegBinary({ default: '/custom/bin/ffmpeg' })).toBe('/custom/bin/ffmpeg');
-    expect(() => getFfmpegBinary(null)).toThrow(/ffmpeg-static binary is not available for this platform[\s\S]*Hint:/);
-    expect(() => getFfmpegBinary('')).toThrow(/ffmpeg-static binary is not available for this platform[\s\S]*Hint:/);
+    expect(() => getFfmpegBinary(null)).toThrow(
+      /'ffmpeg' is required to extract and decode audio from media files[\s\S]*Hint:[\s\S]*brew install ffmpeg[\s\S]*apt[\s\S]*winget/,
+    );
+    expect(() => getFfmpegBinary('')).toThrow(
+      /'ffmpeg' is required to extract and decode audio from media files[\s\S]*Hint:[\s\S]*brew install ffmpeg[\s\S]*apt[\s\S]*winget/,
+    );
+
+    // Test module loader throwing (e.g. missing ffmpeg-static package)
+    expect(() =>
+      getFfmpegBinary(undefined, () => {
+        throw new Error('module not found');
+      }),
+    ).toThrow(/'ffmpeg' is required to extract and decode audio from media files[\s\S]*Hint:/);
   });
 
   test('resolveMediaFile validates media paths and provides recovery hints', () => {

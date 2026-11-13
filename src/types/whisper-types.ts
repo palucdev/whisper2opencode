@@ -28,6 +28,7 @@ export type TranscribeOptions = {
   language?: string;
   modelPath?: string;
   directory?: string;
+  whisperFactory?: unknown;
 };
 
 export type ConvertAudioOptions = {
@@ -51,4 +52,24 @@ export type SaveTranscriptionOptions = {
   sourceFile?: string;
   duration?: string;
   directory?: string;
+};
+
+export type SupportedPackageManager = 'bun' | 'npm' | 'pnpm' | 'yarn';
+
+export type DownloadWhisperOptions = {
+  packageManager?: SupportedPackageManager;
+  modelName?: string;
+  skipModel?: boolean;
+  directory?: string;
+  moduleLoader?: (id: string) => unknown;
+};
+
+export type DownloadWhisperResult = {
+  packageManager: SupportedPackageManager;
+  directory: string;
+  packageStatus: string;
+  modelName?: string;
+  modelPath?: string;
+  modelStatus?: string;
+  summary: string;
 };

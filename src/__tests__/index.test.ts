@@ -8,6 +8,7 @@ import * as commandsConfig from '../configuration/commands-config.js';
 import * as skillsConfig from '../configuration/skills-config.js';
 import WhisperPlugin from '../index.js';
 import { convert_audio } from '../tools/convert_audio.js';
+import { download_whisper, download_whisper_cpp } from '../tools/download_whisper_cpp.js';
 import { save_transcription } from '../tools/save_transcription.js';
 import { transcribe } from '../tools/transcribe.js';
 
@@ -41,6 +42,8 @@ describe('WhisperPlugin', () => {
     expect(plugin.tool?.transcribe).toBe(transcribe);
     expect(plugin.tool?.convert_audio).toBe(convert_audio);
     expect(plugin.tool?.save_transcription).toBe(save_transcription);
+    expect(plugin.tool?.download_whisper_cpp).toBe(download_whisper_cpp);
+    expect(plugin.tool?.download_whisper).toBe(download_whisper);
     expect(typeof plugin.config).toBe('function');
     expect(typeof plugin.dispose).toBe('function');
   });

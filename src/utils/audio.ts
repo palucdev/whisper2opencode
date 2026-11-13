@@ -68,8 +68,15 @@ export function resolveMediaFile(
   return { resolvedPath, stat };
 }
 
-export function getFfmpegBinary(overridePath?: unknown): string {
-  const ffmpegRaw = overridePath !== undefined ? overridePath : (process.env.FFMPEG_PATH ?? (require('ffmpeg-static') as unknown));
+export function getFfmpegBinary(overridePath?: unknown, moduleLoader: (id: string) => unknown = require): string {
+  let ffmpegRaw = overridePath !== undefined ? overridePath : process.env.FFMPEG_PATH;
+  if (ffmpegRaw === undefined) {
+    try {
+      ffmpegRaw = moduleLoader('ffmpeg-static') as unknown;
+    } catch {
+      ffmpegRaw = null;
+    }
+  }
   const ffmpegPath =
     typeof ffmpegRaw === 'string' && ffmpegRaw.trim()
       ? ffmpegRaw.trim()
@@ -78,7 +85,16 @@ export function getFfmpegBinary(overridePath?: unknown): string {
         : null;
   if (!ffmpegPath) {
     throw new Error(
-      "ffmpeg-static binary is not available for this platform. Hint: Convert the input file to raw 16kHz mono 32-bit float PCM (.pcmf32) externally and pass the .pcmf32 file to 'transcribe'.",
+      "'ffmpeg' is required to extract and decode audio from media files, but was not found.\n\n" +
+        'Hint: Install ffmpeg in your environment using your package manager:\n' +
+        '  - macOS: brew install ffmpeg\n' +
+        '  - Ubuntu / Debian: sudo apt update && sudo apt install -y ffmpeg\n' +
+        '  - Fedora: sudo dnf install -y ffmpeg\n' +
+        '  - Arch Linux: sudo pacman -S ffmpeg\n' +
+        '  - Windows: winget install Gyan.FFmpeg (or choco install ffmpeg)\n\n' +
+        'Or set the FFMPEG_PATH environment variable:\n' +
+        '  export FFMPEG_PATH="/path/to/ffmpeg"\n\n' +
+        "Alternative: Convert the media externally to 16kHz mono 32-bit float PCM (.pcmf32) and pass the .pcmf32 file to 'transcribe'.",
     );
   }
   return ffmpegPath;

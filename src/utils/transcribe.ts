@@ -119,12 +119,24 @@ async function resolveModelPath(customModelPath: string | undefined, baseDir: st
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to download default model from ${DEFAULT_MODEL_URL} (${detail}). Hint: Check internet connectivity, or provide a local GGML .bin model file via 'modelPath' or the WHISPER_MODEL_PATH environment variable.`,
+      `Failed to download default model from ${DEFAULT_MODEL_URL} (${detail}).\n\n` +
+        "Hint: Use the 'download_whisper_cpp' tool to download the required speech model, or download it manually into your environment:\n" +
+        '  mkdir -p ~/.cache/whisper2opencode\n' +
+        '  curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
+        '    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
+        'Or set the WHISPER_MODEL_PATH environment variable to a local GGML .bin model file:\n' +
+        '  export WHISPER_MODEL_PATH="/path/to/ggml-base.en.bin"',
     );
   }
   if (!response.ok) {
     throw new Error(
-      `Failed to download default model (${response.status} ${response.statusText}). Hint: Check internet connectivity, or provide a local GGML .bin model file via 'modelPath' or the WHISPER_MODEL_PATH environment variable.`,
+      `Failed to download default model (${response.status} ${response.statusText}).\n\n` +
+        "Hint: Use the 'download_whisper_cpp' tool to download the required speech model, or download it manually into your environment:\n" +
+        '  mkdir -p ~/.cache/whisper2opencode\n' +
+        '  curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
+        '    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
+        'Or set the WHISPER_MODEL_PATH environment variable to a local GGML .bin model file:\n' +
+        '  export WHISPER_MODEL_PATH="/path/to/ggml-base.en.bin"',
     );
   }
 
@@ -162,6 +174,54 @@ function formatWordLines(segments: TranscriptionSegment[]): string[] {
   return lines;
 }
 
+export function loadWhisperFactory(overrideFactory?: unknown, moduleLoader: (id: string) => unknown = require, targetDir?: string): WhisperFactory {
+  if (overrideFactory !== undefined) {
+    if (typeof overrideFactory === 'function') {
+      return overrideFactory as WhisperFactory;
+    }
+  } else {
+    try {
+      const loaded = moduleLoader('whisper.cpp');
+      if (typeof loaded === 'function') {
+        return loaded as WhisperFactory;
+      }
+    } catch {
+      // Fall through to checking targetDir below
+    }
+
+    if (targetDir) {
+      try {
+        const localRequire = createRequire(path.join(path.resolve(targetDir), 'noop.js'));
+        const loaded = localRequire('whisper.cpp');
+        if (typeof loaded === 'function') {
+          return loaded as WhisperFactory;
+        }
+      } catch {
+        // Fall through to descriptive error below
+      }
+    }
+  }
+
+  throw new Error(
+    "Package 'whisper.cpp' is required for transcription, but was not found or could not be loaded in your environment.\n\n" +
+      "Hint: Run the 'download_whisper_cpp' tool to automatically download and set up whisper.cpp and the default speech model for your current setup:\n" +
+      '  - Tool call: download_whisper_cpp({})\n\n' +
+      'Or manually install whisper.cpp in your plugin or project directory:\n' +
+      '   - Bun: bun add whisper.cpp\n' +
+      '   - Node: npm install whisper.cpp\n\n' +
+      '2. Download a GGML model file (.bin):\n' +
+      '   - For English (default, ~142MB):\n' +
+      '     mkdir -p ~/.cache/whisper2opencode\n' +
+      '     curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
+      '       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
+      '   - For Multilingual (e.g. Polish, Spanish, German):\n' +
+      '     curl -L -o ~/.cache/whisper2opencode/ggml-base.bin \\\n' +
+      '       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin\n\n' +
+      '3. (Optional) Point to a custom model path via environment variable:\n' +
+      '   export WHISPER_MODEL_PATH="~/.cache/whisper2opencode/ggml-base.en.bin"',
+  );
+}
+
 export async function transcribeAudioFile(options: TranscribeOptions): Promise<string> {
   const baseDir = options.directory ?? process.cwd();
   const { resolvedPath: resolvedInputPath, stat } = resolveMediaFile(options.filePath, baseDir, 'filePath');
@@ -175,7 +235,7 @@ export async function transcribeAudioFile(options: TranscribeOptions): Promise<s
     const pcm = decodeAudioToFloat32(resolvedInputPath);
     const durationMs = Math.round((pcm.length / SAMPLE_RATE) * 1000);
 
-    const whisperFactory = require('whisper.cpp') as WhisperFactory;
+    const whisperFactory = loadWhisperFactory(options.whisperFactory, require, baseDir);
     const stdoutLines: string[] = [];
     const stderrLines: string[] = [];
 
