@@ -1,7 +1,9 @@
+import type { execFileSync } from 'node:child_process';
+
 export type WhisperInstance = {
   FS_createDataFile(parent: string, name: string, data: Uint8Array, canRead: boolean, canWrite: boolean): void;
   init(pathModel: string): boolean;
-  full_default(audio: Float32Array, lang: string, translate: boolean): number;
+  full_default(audio: Float32Array, language: string, isTranslate: boolean): number;
   free(): void;
   PThread?: {
     terminateAllThreads(): void;
@@ -38,6 +40,7 @@ export type ConvertAudioOptions = {
   sampleRate?: number;
   channels?: number;
   overwrite?: boolean;
+  isOverwrite?: boolean;
   directory?: string;
 };
 
@@ -61,7 +64,7 @@ export type DownloadWhisperOptions = {
   modelName?: string;
   skipModel?: boolean;
   directory?: string;
-  moduleLoader?: (id: string) => unknown;
+  moduleLoader?: (identifier: string) => unknown;
 };
 
 export type DownloadWhisperResult = {
@@ -73,3 +76,22 @@ export type DownloadWhisperResult = {
   modelStatus?: string;
   summary: string;
 };
+
+export interface ResolveMediaOptions {
+  inputPath: string | undefined;
+  baseDirectory: string;
+  argumentName: 'filePath' | 'inputPath';
+}
+
+export interface LoadWhisperFactoryOptions {
+  overrideFactory?: unknown;
+  moduleLoader?: (identifier: string) => unknown;
+  targetDirectory?: string;
+}
+
+export interface InstallWhisperPackageOptions {
+  targetDirectory: string;
+  packageManager: SupportedPackageManager;
+  processRunner?: typeof execFileSync;
+  fetchImpl?: typeof fetch;
+}

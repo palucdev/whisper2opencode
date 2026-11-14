@@ -1,11 +1,25 @@
 import { mock } from 'bun:test';
 import * as realCp from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import { createMockWavBuffer } from './fixtures.js';
+import { fileSystem } from '../utils/file-system.js';
 
 export type MockFfmpegDecodeMode = 'success' | 'no-stream' | 'invalid-format' | 'generic' | 'generic-no-stderr' | 'zero-samples';
 export type MockFfmpegConvertMode = 'success' | 'no-stream' | 'generic' | 'generic-no-stderr';
+
+const MOCK_PCM_SAMPLE_COUNT = 16_000;
+
+interface FfmpegExecError extends Error {
+  stderr?: Buffer;
+}
+
+const createFfmpegError = (message: string, stderrOutput?: string): FfmpegExecError => {
+  const ffmpegError: FfmpegExecError = new Error(message);
+  if (stderrOutput !== undefined) {
+    ffmpegError.stderr = Buffer.from(stderrOutput);
+  }
+  return ffmpegError;
+};
 
 export const mockFfmpegState = {
   decodeMode: 'success' as MockFfmpegDecodeMode,
@@ -18,71 +32,77 @@ export const mockFfmpegState = {
   },
 };
 
-const mockExecFileSync = (file: string | URL, args?: readonly string[], options?: unknown) => {
-  const fileStr = String(file);
-  const argsArr = (args || []).map(String);
-  const isFfmpeg = fileStr.includes('ffmpeg') || argsArr.includes('-hide_banner');
-  if (!isFfmpeg) {
-    return (realCp.execFileSync as any)(file, args, options);
-  }
-
-  const iIdx = argsArr.indexOf('-i');
-  const inputPath = iIdx !== -1 ? argsArr[iIdx + 1] : undefined;
-  const isDecode = argsArr.includes('pipe:1');
-
-  if (isDecode) {
-    const mode = (inputPath && mockFfmpegState.filePathModes.get(inputPath)) || mockFfmpegState.decodeMode;
-    if (mode === 'no-stream') {
-      const err = new Error('ffmpeg failed');
-      (err as any).stderr = Buffer.from('Output file does not contain any stream');
-      throw err;
-    }
-    if (mode === 'invalid-format') {
-      const err = new Error('ffmpeg failed');
-      (err as any).stderr = Buffer.from('Invalid data found when processing input');
-      throw err;
-    }
-    if (mode === 'generic') {
-      const err = new Error('ffmpeg failed');
-      (err as any).stderr = Buffer.from('ffmpeg generic decode error');
-      throw err;
-    }
-    if (mode === 'generic-no-stderr') {
-      throw new Error('ffmpeg execution failure without stderr');
-    }
-    if (mode === 'zero-samples') {
-      return Buffer.alloc(0);
-    }
-
-    const pcm = new Float32Array(16000);
-    return Buffer.from(pcm.buffer);
-  }
-
-  const mode = (inputPath && mockFfmpegState.filePathModes.get(inputPath)) || mockFfmpegState.convertMode;
+const handleMockDecode = (inputPath: string | undefined): Buffer => {
+  const mode = (inputPath !== undefined && mockFfmpegState.filePathModes.get(inputPath)) || mockFfmpegState.decodeMode;
   if (mode === 'no-stream') {
-    const err = new Error('ffmpeg failed');
-    (err as any).stderr = Buffer.from('Output file does not contain any stream');
-    throw err;
+    throw createFfmpegError('ffmpeg failed', 'Output file does not contain any stream');
+  }
+  if (mode === 'invalid-format') {
+    throw createFfmpegError('ffmpeg failed', 'Invalid data found when processing input');
   }
   if (mode === 'generic') {
-    const err = new Error('ffmpeg failed');
-    (err as any).stderr = Buffer.from('ffmpeg generic convert failure');
-    throw err;
+    throw createFfmpegError('ffmpeg failed', 'ffmpeg generic decode error');
+  }
+  if (mode === 'generic-no-stderr') {
+    throw createFfmpegError('ffmpeg execution failure without stderr');
+  }
+  if (mode === 'zero-samples') {
+    return Buffer.alloc(0);
   }
 
-  const outputPath = argsArr[argsArr.length - 1];
-  if (outputPath && typeof outputPath === 'string') {
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    if (outputPath.endsWith('.pcmf32')) {
-      fs.writeFileSync(outputPath, Buffer.from(new Float32Array(16000).buffer));
-    } else if (outputPath.endsWith('.wav')) {
-      fs.writeFileSync(outputPath, createMockWavBuffer(1, 16000));
-    } else {
-      fs.writeFileSync(outputPath, Buffer.from('mock-converted-media'));
-    }
+  const pcm = new Float32Array(MOCK_PCM_SAMPLE_COUNT);
+  return Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+};
+
+const writeConvertedOutput = (outputPath: string): void => {
+  fileSystem.mkdirSync(path.dirname(outputPath), { recursive: true });
+  if (outputPath.endsWith('.pcmf32')) {
+    const pcm = new Float32Array(MOCK_PCM_SAMPLE_COUNT);
+    fileSystem.writeFileSync(outputPath, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+    return;
+  }
+  if (outputPath.endsWith('.wav')) {
+    fileSystem.writeFileSync(outputPath, createMockWavBuffer(1, MOCK_PCM_SAMPLE_COUNT));
+    return;
+  }
+  fileSystem.writeFileSync(outputPath, Buffer.from('mock-converted-media'));
+};
+
+const handleMockConvert = (inputPath: string | undefined, commandArguments: string[]): Buffer => {
+  const mode = (inputPath !== undefined && mockFfmpegState.filePathModes.get(inputPath)) || mockFfmpegState.convertMode;
+  if (mode === 'no-stream') {
+    throw createFfmpegError('ffmpeg failed', 'Output file does not contain any stream');
+  }
+  if (mode === 'generic') {
+    throw createFfmpegError('ffmpeg failed', 'ffmpeg generic convert failure');
+  }
+
+  const outputPath = commandArguments.at(-1);
+  if (typeof outputPath === 'string') {
+    writeConvertedOutput(outputPath);
   }
 
   return Buffer.alloc(0);
+};
+
+const extractInputPath = (commandArguments: string[]): string | undefined => {
+  const inputFlagIndex = commandArguments.indexOf('-i');
+  return inputFlagIndex === -1 ? undefined : commandArguments[inputFlagIndex + 1];
+};
+
+const mockExecFileSync = (file: string | URL, ...restArguments: unknown[]): Buffer => {
+  const fileString = String(file);
+  const rawArguments = Array.isArray(restArguments[0]) ? restArguments[0] : [];
+  const commandArguments = (rawArguments as unknown[]).map(String);
+  const isFfmpeg = fileString.includes('ffmpeg') || commandArguments.includes('-hide_banner');
+  if (!isFfmpeg) {
+    return Reflect.apply(realCp.execFileSync, realCp, [file, ...restArguments]) as Buffer;
+  }
+
+  const inputPath = extractInputPath(commandArguments);
+  const isDecode = commandArguments.includes('pipe:1');
+
+  return isDecode ? handleMockDecode(inputPath) : handleMockConvert(inputPath, commandArguments);
 };
 
 mock.module('node:child_process', () => ({

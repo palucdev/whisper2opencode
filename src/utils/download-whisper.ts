@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import type { DownloadWhisperOptions, DownloadWhisperResult, SupportedPackageManager } from '../types/whisper-types.js';
+import type { DownloadWhisperOptions, DownloadWhisperResult, InstallWhisperPackageOptions, SupportedPackageManager } from '../types/whisper-types.js';
+import { fileSystem } from './file-system.js';
+
+export { unpackTarballBuffer } from './tar-utility.js';
+import { unpackTarballBuffer } from './tar-utility.js';
 
 export const NPM_PACKAGE_NAME = 'whisper.cpp';
 export const NPM_PACKAGE_VERSION = '1.0.3';
@@ -11,112 +14,57 @@ export const NPM_REGISTRY_TARBALL_URL = `https://registry.npmjs.org/${NPM_PACKAG
 export const DEFAULT_MODEL_NAME = 'base.en';
 export const HUGGINGFACE_MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
 
-const MODEL_ALIASES: Record<string, string> = {
-  tiny: 'ggml-tiny.bin',
-  'tiny.en': 'ggml-tiny.en.bin',
-  base: 'ggml-base.bin',
-  'base.en': 'ggml-base.en.bin',
-  small: 'ggml-small.bin',
-  'small.en': 'ggml-small.en.bin',
-  medium: 'ggml-medium.bin',
-  'medium.en': 'ggml-medium.en.bin',
-  'large-v1': 'ggml-large-v1.bin',
-  'large-v2': 'ggml-large-v2.bin',
-  'large-v3': 'ggml-large-v3.bin',
-  large: 'ggml-large-v3.bin',
-};
+const MODEL_ALIASES = new Map<string, string>([['large', 'ggml-large-v3.bin']]);
 
-/**
- * Normalizes user-specified model names into canonical GGML filenames (e.g. 'base.en' -> 'ggml-base.en.bin').
- */
+// Normalizes user-specified model names into canonical GGML filenames (e.g. 'base.en' -> 'ggml-base.en.bin').
 export function resolveModelFileName(name?: string): string {
   const trimmed = name?.trim().toLowerCase();
-  if (!trimmed) {
-    return 'ggml-base.en.bin';
-  }
-
-  if (trimmed.endsWith('.bin')) {
-    return trimmed.startsWith('ggml-') ? trimmed : `ggml-${trimmed}`;
-  }
-
-  return MODEL_ALIASES[trimmed] ?? `ggml-${trimmed}.bin`;
+  if (!trimmed) return 'ggml-base.en.bin';
+  if (trimmed.endsWith('.bin')) return trimmed.startsWith('ggml-') ? trimmed : `ggml-${trimmed}`;
+  return MODEL_ALIASES.get(trimmed) ?? `ggml-${trimmed}.bin`;
 }
 
-/**
- * Detects the appropriate package manager for the current directory setup.
- * Inspects lockfiles in targetDir and parent directories, falling back to runtime detection (Bun vs Node).
- */
-export function detectPackageManager(targetDir: string): SupportedPackageManager {
-  let curr = path.resolve(targetDir);
-  const root = path.parse(curr).root;
+const LOCKFILE_MANAGERS: readonly [string, SupportedPackageManager][] = [
+  ['bun.lock', 'bun'],
+  ['bun.lockb', 'bun'],
+  ['pnpm-lock.yaml', 'pnpm'],
+  ['yarn.lock', 'yarn'],
+  ['package-lock.json', 'npm'],
+];
 
-  while (curr && curr !== root) {
-    if (fs.existsSync(path.join(curr, 'bun.lock')) || fs.existsSync(path.join(curr, 'bun.lockb'))) {
-      return 'bun';
+// Detects the appropriate package manager for the current directory setup.
+// Inspects lockfiles in targetDirectory and parent directories, falling back to runtime detection (Bun vs Node).
+export function detectPackageManager(targetDirectory: string): SupportedPackageManager {
+  let currentDirectory = path.resolve(targetDirectory);
+  const root = path.parse(currentDirectory).root;
+
+  while (currentDirectory && currentDirectory !== root) {
+    for (const [lockfile, manager] of LOCKFILE_MANAGERS) {
+      if (fileSystem.existsSync(path.join(currentDirectory, lockfile))) {
+        return manager;
+      }
     }
-    if (fs.existsSync(path.join(curr, 'pnpm-lock.yaml'))) {
-      return 'pnpm';
-    }
-    if (fs.existsSync(path.join(curr, 'yarn.lock'))) {
-      return 'yarn';
-    }
-    if (fs.existsSync(path.join(curr, 'package-lock.json'))) {
-      return 'npm';
-    }
-    curr = path.dirname(curr);
+    currentDirectory = path.dirname(currentDirectory);
   }
 
   // Runtime fallback
-  if (typeof (process.versions as Record<string, string | undefined>).bun === 'string') {
-    return 'bun';
-  }
-
-  return 'npm';
+  return typeof (process.versions as Record<string, string | undefined>).bun === 'string' ? 'bun' : 'npm';
 }
 
-/**
- * Pure JavaScript tar extractor for unpacked gzip buffers.
- * Unpacks the `package/` folder of an npm package directly into `targetDir`.
- */
-export function unpackTarballBuffer(tarBuffer: Buffer, targetDir: string): void {
-  let offset = 0;
-  while (offset + 512 <= tarBuffer.length) {
-    const header = tarBuffer.subarray(offset, offset + 512);
-    // 512 consecutive zero bytes indicate end of archive
-    if (header.every((byte) => byte === 0)) break;
-
-    const rawName = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '').trim();
-    const sizeOctal = header.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim();
-    const typeFlag = String.fromCharCode(header[156] || 48); // '0' or '\0' is normal file, '5' is dir
-    const size = parseInt(sizeOctal, 8) || 0;
-
-    offset += 512;
-
-    if (rawName && (typeFlag === '0' || typeFlag === '\0')) {
-      const relativePath = rawName.replace(/^package\//, '');
-      const outFilePath = path.join(targetDir, relativePath);
-      fs.mkdirSync(path.dirname(outFilePath), { recursive: true });
-      fs.writeFileSync(outFilePath, tarBuffer.subarray(offset, offset + size));
-    }
-
-    offset += Math.ceil(size / 512) * 512;
-  }
-}
-
-/**
- * Downloads the whisper.cpp npm package tarball directly from the npm registry
- * and extracts it into <targetDir>/node_modules/whisper.cpp.
- */
-export async function downloadPackageFromRegistry(targetDir: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<string> {
-  const nodeModulesDir = path.join(targetDir, 'node_modules', NPM_PACKAGE_NAME);
-  fs.mkdirSync(nodeModulesDir, { recursive: true });
+// Downloads the whisper.cpp npm package tarball directly from the npm registry
+// and extracts it into <targetDirectory>/node_modules/whisper.cpp.
+export async function downloadPackageFromRegistry(targetDirectory: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const nodeModulesDirectory = path.join(targetDirectory, 'node_modules', NPM_PACKAGE_NAME);
+  fileSystem.mkdirSync(nodeModulesDirectory, { recursive: true });
 
   let response: Response;
   try {
     response = await fetchImpl(NPM_REGISTRY_TARBALL_URL);
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to download '${NPM_PACKAGE_NAME}' from npm registry (${detail}). Hint: Check internet connection or retry.`);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to download '${NPM_PACKAGE_NAME}' from npm registry (${detail}). Hint: Check internet connection or retry.`, {
+      cause: error,
+    });
   }
 
   if (!response.ok) {
@@ -125,96 +73,107 @@ export async function downloadPackageFromRegistry(targetDir: string, fetchImpl: 
     );
   }
 
-  const arrayBuf = await response.arrayBuffer();
-  const compressedBuffer = Buffer.from(arrayBuf);
+  const compressedBuffer = Buffer.from(await response.arrayBuffer());
   const tarBuffer = zlib.gunzipSync(compressedBuffer);
 
-  unpackTarballBuffer(tarBuffer, nodeModulesDir);
-  return nodeModulesDir;
+  unpackTarballBuffer(tarBuffer, nodeModulesDirectory);
+  return nodeModulesDirectory;
 }
 
-/**
- * Installs whisper.cpp into the target directory using the detected package manager,
- * falling back to direct npm registry extraction if package manager CLI execution fails.
- */
-export async function installWhisperPackage(
-  targetDir: string,
-  packageManager: SupportedPackageManager,
-  options?: {
-    processRunner?: typeof execFileSync;
-    fetchImpl?: typeof fetch;
-  },
-): Promise<{ status: string; method: 'cli' | 'registry'; path: string }> {
-  const runner = options?.processRunner ?? execFileSync;
-  fs.mkdirSync(targetDir, { recursive: true });
+const PM_COMMANDS = new Map<SupportedPackageManager, { command: string; commandArguments: string[] }>([
+  ['bun', { command: 'bun', commandArguments: ['add', NPM_PACKAGE_NAME] }],
+  ['pnpm', { command: 'pnpm', commandArguments: ['add', NPM_PACKAGE_NAME] }],
+  ['yarn', { command: 'yarn', commandArguments: ['add', NPM_PACKAGE_NAME] }],
+  ['npm', { command: 'npm', commandArguments: ['install', NPM_PACKAGE_NAME] }],
+]);
 
-  const pmCommands: Record<SupportedPackageManager, { cmd: string; args: string[] }> = {
-    bun: { cmd: 'bun', args: ['add', NPM_PACKAGE_NAME] },
-    pnpm: { cmd: 'pnpm', args: ['add', NPM_PACKAGE_NAME] },
-    yarn: { cmd: 'yarn', args: ['add', NPM_PACKAGE_NAME] },
-    npm: { cmd: 'npm', args: ['install', NPM_PACKAGE_NAME] },
+const resolveInstallOptions = (
+  targetDirectoryOrOptions: InstallWhisperPackageOptions | string,
+  restArguments: unknown[],
+): InstallWhisperPackageOptions => {
+  if (typeof targetDirectoryOrOptions === 'object') {
+    return targetDirectoryOrOptions;
+  }
+  const extraOptions = restArguments[1] as { processRunner?: typeof execFileSync; fetchImpl?: typeof fetch } | undefined;
+  return {
+    targetDirectory: targetDirectoryOrOptions,
+    packageManager: (restArguments[0] as SupportedPackageManager) ?? 'npm',
+    processRunner: extraOptions?.processRunner,
+    fetchImpl: extraOptions?.fetchImpl,
   };
+};
 
-  const { cmd, args } = pmCommands[packageManager];
+// Installs whisper.cpp into the target directory using the detected package manager,
+// falling back to direct npm registry extraction if package manager CLI execution fails.
+export async function installWhisperPackage(
+  targetDirectoryOrOptions: InstallWhisperPackageOptions | string,
+  ...restArguments: unknown[]
+): Promise<{ status: string; method: 'cli' | 'registry'; path: string }> {
+  const options = resolveInstallOptions(targetDirectoryOrOptions, restArguments);
+  const { targetDirectory, packageManager } = options;
+  const runner = options.processRunner ?? execFileSync;
+  fileSystem.mkdirSync(targetDirectory, { recursive: true });
+
+  const commandConfig = PM_COMMANDS.get(packageManager) ?? { command: 'npm', commandArguments: ['install', NPM_PACKAGE_NAME] };
 
   try {
-    runner(cmd, args, {
-      cwd: targetDir,
+    runner(commandConfig.command, commandConfig.commandArguments, {
+      cwd: targetDirectory,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    const installedPath = path.join(targetDir, 'node_modules', NPM_PACKAGE_NAME);
+    const installedPath = path.join(targetDirectory, 'node_modules', NPM_PACKAGE_NAME);
     return {
       status: `Successfully installed '${NPM_PACKAGE_NAME}' using ${packageManager}`,
       method: 'cli',
       path: installedPath,
     };
-  } catch (cliErr) {
-    // Fall back to direct download and extraction from npm registry
+  } catch (cliError) {
     try {
-      const extractedPath = await downloadPackageFromRegistry(targetDir, options?.fetchImpl);
+      const extractedPath = await downloadPackageFromRegistry(targetDirectory, options.fetchImpl);
       return {
-        status: `Installed '${NPM_PACKAGE_NAME}' via direct npm registry download (${cmd} command failed or was unavailable)`,
+        status: `Installed '${NPM_PACKAGE_NAME}' via direct npm registry download (${commandConfig.command} command failed or was unavailable)`,
         method: 'registry',
         path: extractedPath,
       };
-    } catch (fallbackErr) {
-      const cliDetail = cliErr instanceof Error ? cliErr.message : String(cliErr);
-      const fallbackDetail = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+    } catch (fallbackError) {
+      const cliDetail = cliError instanceof Error ? cliError.message : String(cliError);
+      const fallbackDetail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      const manualInstallCommand = packageManager === 'npm' ? 'npm install' : `${packageManager} add`;
       throw new Error(
         `Failed to install '${NPM_PACKAGE_NAME}' using ${packageManager} (${cliDetail}), and direct registry download also failed (${fallbackDetail}).\n\n` +
-          `Hint: Run '${packageManager === 'npm' ? 'npm install' : `${packageManager} add`} whisper.cpp' manually in "${targetDir}".`,
+          `Hint: Run '${manualInstallCommand} whisper.cpp' manually in "${targetDirectory}".`,
+        { cause: fallbackError },
       );
     }
   }
 }
 
-/**
- * Downloads a GGML model file from Hugging Face if not already present in the user cache directory.
- */
+// Downloads a GGML model file from Hugging Face if not already present in the user cache directory.
 export async function downloadGgmlModel(
   modelName: string,
-  fetchImpl: typeof fetch = globalThis.fetch,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<{ modelPath: string; status: 'cached' | 'downloaded' }> {
   const resolvedFileName = resolveModelFileName(modelName);
-  const cacheDir = path.join(os.homedir(), '.cache', 'whisper2opencode');
-  const cachedModelPath = path.join(cacheDir, resolvedFileName);
+  const cacheDirectory = path.join(os.homedir(), '.cache', 'whisper2opencode');
+  const cachedModelPath = path.join(cacheDirectory, resolvedFileName);
 
-  if (fs.existsSync(cachedModelPath) && fs.statSync(cachedModelPath).size > 0) {
+  if (fileSystem.existsSync(cachedModelPath) && fileSystem.statSync(cachedModelPath).size > 0) {
     return { modelPath: cachedModelPath, status: 'cached' };
   }
 
-  fs.mkdirSync(cacheDir, { recursive: true });
+  fileSystem.mkdirSync(cacheDirectory, { recursive: true });
   const modelUrl = `${HUGGINGFACE_MODEL_BASE_URL}/${resolvedFileName}`;
 
   let response: Response;
   try {
     response = await fetchImpl(modelUrl);
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Failed to download model "${resolvedFileName}" from ${modelUrl} (${detail}).\n\n` +
         `Hint: Download manually using: curl -L -o ~/.cache/whisper2opencode/${resolvedFileName} ${modelUrl}`,
+      { cause: error },
     );
   }
 
@@ -225,28 +184,39 @@ export async function downloadGgmlModel(
     );
   }
 
-  const tmpPath = `${cachedModelPath}.tmp-${process.pid}-${Date.now()}`;
+  const temporaryPath = `${cachedModelPath}.tmp-${process.pid}-${Date.now()}`;
   const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(tmpPath, buffer);
-  fs.renameSync(tmpPath, cachedModelPath);
+  fileSystem.writeFileSync(temporaryPath, buffer);
+  fileSystem.renameSync(temporaryPath, cachedModelPath);
 
   return { modelPath: cachedModelPath, status: 'downloaded' };
 }
 
-/**
- * Orchestrates downloading and configuring whisper.cpp and the speech recognition model
- * for the current runtime and directory setup.
- */
+const formatModelStatusLine = (
+  modelResult: { modelPath: string; status: 'cached' | 'downloaded' } | undefined,
+  canonicalModelName: string,
+): string => {
+  if (!modelResult) {
+    return 'GGML Model: Skipped upon request';
+  }
+  const statusLabel = modelResult.status === 'cached' ? 'Already cached' : 'Downloaded successfully';
+  return `GGML Model (${canonicalModelName}): ${statusLabel} at ${modelResult.modelPath}`;
+};
+
+// Orchestrates downloading and configuring whisper.cpp and the speech recognition model
+// for the current runtime and directory setup.
 export async function downloadWhisperSetup(
   options: DownloadWhisperOptions & {
     processRunner?: typeof execFileSync;
     fetchImpl?: typeof fetch;
   } = {},
 ): Promise<DownloadWhisperResult> {
-  const targetDir = path.resolve(options.directory ?? process.cwd());
-  const pm = options.packageManager ?? detectPackageManager(targetDir);
+  const targetDirectory = path.resolve(options.directory ?? process.cwd());
+  const packageManager = options.packageManager ?? detectPackageManager(targetDirectory);
 
-  const pkgResult = await installWhisperPackage(targetDir, pm, {
+  const packageResult = await installWhisperPackage({
+    targetDirectory,
+    packageManager,
     processRunner: options.processRunner,
     fetchImpl: options.fetchImpl,
   });
@@ -258,22 +228,18 @@ export async function downloadWhisperSetup(
     modelResult = await downloadGgmlModel(canonicalModelName, options.fetchImpl);
   }
 
-  const lines = [`Setup Directory: ${targetDir}`, `Package Manager: ${pm}`, `whisper.cpp Package: ${pkgResult.status} (${pkgResult.path})`];
-
-  if (modelResult) {
-    lines.push(
-      `GGML Model (${canonicalModelName}): ${modelResult.status === 'cached' ? 'Already cached' : 'Downloaded successfully'} at ${modelResult.modelPath}`,
-    );
-  } else {
-    lines.push('GGML Model: Skipped upon request');
-  }
-
-  lines.push('whisper.cpp transcription is ready to use.');
+  const lines = [
+    `Setup Directory: ${targetDirectory}`,
+    `Package Manager: ${packageManager}`,
+    `whisper.cpp Package: ${packageResult.status} (${packageResult.path})`,
+    formatModelStatusLine(modelResult, canonicalModelName),
+    'whisper.cpp transcription is ready to use.',
+  ];
 
   return {
-    packageManager: pm,
-    directory: targetDir,
-    packageStatus: pkgResult.status,
+    packageManager,
+    directory: targetDirectory,
+    packageStatus: packageResult.status,
     modelName: canonicalModelName,
     modelPath: modelResult?.modelPath,
     modelStatus: modelResult?.status,

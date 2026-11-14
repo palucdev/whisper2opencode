@@ -1,24 +1,14 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { download_whisper, download_whisper_cpp } from '../../tools/download_whisper_cpp.js';
-import * as downloadUtil from '../../utils/download-whisper.js';
+import { download_whisper, download_whisper_cpp } from '../../tools/download-whisper-cpp.js';
+import type { DownloadWhisperOptions } from '../../types/whisper-types.js';
+import * as downloadWhisperModule from '../../utils/download-whisper.js';
 import { createTestContext } from '../fixtures.js';
 
-describe('download_whisper_cpp tool', () => {
-  let tempDir: string;
+const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'tool-download-whisper-cpp');
 
-  beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `whisper2opencode-tool-test-${process.pid}-`));
-  });
-
-  afterEach(() => {
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
+describe('download_whisper_cpp schema and metadata', () => {
   test('tool definition has descriptive metadata and arguments schema', () => {
     expect(download_whisper_cpp).toBeDefined();
     expect(download_whisper_cpp.description).toContain('whisper.cpp');
@@ -28,46 +18,90 @@ describe('download_whisper_cpp tool', () => {
     expect(download_whisper_cpp.args.directory).toBeDefined();
     expect(download_whisper).toBe(download_whisper_cpp);
   });
+});
 
-  test('executes downloadWhisperSetup with arguments and defaults directory to context.directory', async () => {
-    let capturedOptions: any;
-    const downloadSpy = spyOn(downloadUtil, 'downloadWhisperSetup').mockImplementation((opts: any) => {
-      capturedOptions = opts;
+describe('download_whisper_cpp execution with explicit options', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    temporaryDirectory = TEST_ROOT;
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  test('executes downloadWhisperSetup with explicit options', async () => {
+    let capturedOptions: DownloadWhisperOptions | undefined;
+    const downloadSpy = spyOn(downloadWhisperModule, 'downloadWhisperSetup').mockImplementation((options) => {
+      capturedOptions = options;
       return Promise.resolve({
-        packageManager: opts.packageManager ?? 'bun',
-        directory: opts.directory,
+        packageManager: options.packageManager ?? 'bun',
+        directory: options.directory ?? '',
         packageStatus: 'installed',
         summary: 'Mock setup completed successfully.',
       });
     });
 
-    const ctx = createTestContext(tempDir);
+    const testContext = createTestContext(temporaryDirectory);
     try {
-      // 1. Invoked with explicit args
-      const customDir = path.join(tempDir, 'custom-workspace');
-      const output1 = await download_whisper_cpp.execute(
+      const customDirectory = path.join(temporaryDirectory, 'custom-workspace');
+      const output = await download_whisper_cpp.execute(
         {
           packageManager: 'bun',
           modelName: 'tiny.en',
           skipModel: true,
-          directory: customDir,
+          directory: customDirectory,
         },
-        ctx,
+        testContext,
       );
 
-      expect(output1).toBe('Mock setup completed successfully.');
-      expect(capturedOptions.packageManager).toBe('bun');
-      expect(capturedOptions.modelName).toBe('tiny.en');
-      expect(capturedOptions.skipModel).toBe(true);
-      expect(capturedOptions.directory).toBe(customDir);
+      expect(output).toBe('Mock setup completed successfully.');
+      expect(capturedOptions?.packageManager).toBe('bun');
+      expect(capturedOptions?.modelName).toBe('tiny.en');
+      expect(capturedOptions?.skipModel).toBe(true);
+      expect(capturedOptions?.directory).toBe(customDirectory);
+    } finally {
+      downloadSpy.mockRestore();
+    }
+  });
+});
 
-      // 2. Invoked with default/omitted args (uses context.directory)
-      const output2 = await download_whisper.execute({}, ctx);
-      expect(output2).toBe('Mock setup completed successfully.');
-      expect(capturedOptions.packageManager).toBeUndefined();
-      expect(capturedOptions.modelName).toBeUndefined();
-      expect(capturedOptions.skipModel).toBeUndefined();
-      expect(capturedOptions.directory).toBe(tempDir);
+describe('download_whisper_cpp execution with default options', () => {
+  let temporaryDirectory: string;
+
+  beforeEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
+    temporaryDirectory = TEST_ROOT;
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  });
+
+  test('executes downloadWhisperSetup defaulting directory to context.directory', async () => {
+    let capturedOptions: DownloadWhisperOptions | undefined;
+    const downloadSpy = spyOn(downloadWhisperModule, 'downloadWhisperSetup').mockImplementation((options) => {
+      capturedOptions = options;
+      return Promise.resolve({
+        packageManager: options.packageManager ?? 'bun',
+        directory: options.directory ?? '',
+        packageStatus: 'installed',
+        summary: 'Mock setup completed successfully.',
+      });
+    });
+
+    const testContext = createTestContext(temporaryDirectory);
+    try {
+      const output = await download_whisper.execute({}, testContext);
+      expect(output).toBe('Mock setup completed successfully.');
+      expect(capturedOptions?.packageManager).toBeUndefined();
+      expect(capturedOptions?.modelName).toBeUndefined();
+      expect(capturedOptions?.skipModel).toBeUndefined();
+      expect(capturedOptions?.directory).toBe(temporaryDirectory);
     } finally {
       downloadSpy.mockRestore();
     }

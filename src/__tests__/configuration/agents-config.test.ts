@@ -2,10 +2,10 @@ import { describe, expect, spyOn, test } from 'bun:test';
 
 import { configureAgents } from '../../configuration/agents-config.js';
 import type { OpenCodeConfig } from '../../types/opencode-types.js';
-import * as fileUtil from '../../utils/file-util.js';
+import * as fileUtility from '../../utils/file-utility.js';
 
-describe('configureAgents', () => {
-  test('should initialize config.agent object when agent is undefined', () => {
+describe('configureAgents initialization and tools', () => {
+  test('initializes config.agent object when agent is undefined', () => {
     const config = {} as OpenCodeConfig;
     configureAgents(config);
 
@@ -13,12 +13,11 @@ describe('configureAgents', () => {
     expect(typeof config.agent).toBe('object');
   });
 
-  test('should safely handle null/undefined config without throwing', () => {
-    expect(() => configureAgents(null as any)).not.toThrow();
-    expect(() => configureAgents(undefined as any)).not.toThrow();
+  test('safely handles undefined config without throwing', () => {
+    expect(() => configureAgents(undefined as unknown as OpenCodeConfig)).not.toThrow();
   });
 
-  test('should populate config.agent with markdown files from agents directory and restrict transcribe tool to transcriber agent', () => {
+  test('populates config.agent with markdown files and restricts transcribe tool', () => {
     const config = {} as OpenCodeConfig;
     configureAgents(config);
 
@@ -36,7 +35,7 @@ describe('configureAgents', () => {
     expect(config.agent.transcriber.prompt).toContain('Check the saved transcription file');
   });
 
-  test('should preserve existing user-configured tools.transcribe and permission.transcribe settings', () => {
+  test('preserves existing user-configured tools.transcribe and permission.transcribe settings', () => {
     const config = {
       tools: { transcribe: true },
       permission: { transcribe: 'ask' },
@@ -47,8 +46,10 @@ describe('configureAgents', () => {
     expect(config.tools?.transcribe).toBe(true);
     expect(config.permission?.transcribe).toBe('ask');
   });
+});
 
-  test('should not overwrite existing agent definitions configured by user', () => {
+describe('configureAgents user overrides', () => {
+  test('does not overwrite existing agent definitions configured by user', () => {
     const customAgent = {
       prompt: 'custom agent prompt',
       description: 'custom description',
@@ -59,7 +60,7 @@ describe('configureAgents', () => {
       },
     } as unknown as OpenCodeConfig;
 
-    const spy = spyOn(fileUtil, 'loadMarkdownDir').mockReturnValue([
+    const mockFiles = [
       {
         data: { name: 'existing-agent', description: 'should be ignored' },
         content: 'new prompt',
@@ -68,7 +69,11 @@ describe('configureAgents', () => {
         data: { name: 'new-agent', description: 'new agent desc' },
         content: 'new agent prompt',
       },
-    ] as any);
+    ];
+
+    const spy = spyOn(fileUtility, 'loadMarkdownDirectory').mockReturnValue(
+      mockFiles as unknown as ReturnType<typeof fileUtility.loadMarkdownDirectory>,
+    );
 
     try {
       configureAgents(config);
@@ -82,26 +87,34 @@ describe('configureAgents', () => {
       spy.mockRestore();
     }
   });
+});
 
-  test('should skip markdown files missing a name field', () => {
-    const spy = spyOn(fileUtil, 'loadMarkdownDir').mockReturnValue([
+describe('configureAgents skipped records', () => {
+  test('skips markdown files missing a name field', () => {
+    const mockFiles = [
       {
         data: { description: 'No name agent' },
         content: 'Prompt without name',
       },
-    ] as any);
+    ];
+
+    const spy = spyOn(fileUtility, 'loadMarkdownDirectory').mockReturnValue(
+      mockFiles as unknown as ReturnType<typeof fileUtility.loadMarkdownDirectory>,
+    );
 
     try {
       const config = {} as OpenCodeConfig;
       configureAgents(config);
 
-      expect(Object.keys(config.agent).length).toBe(0);
+      expect(Object.keys(config.agent)).toHaveLength(0);
     } finally {
       spy.mockRestore();
     }
   });
+});
 
-  test('should parse agent metadata including description, mode, model, hidden flag, tools, and permissions', () => {
+describe('configureAgents metadata parsing', () => {
+  test('parses agent metadata including description, mode, model, hidden flag, tools, and permissions', () => {
     const mockMarkdownFiles = [
       {
         data: {
@@ -125,7 +138,9 @@ describe('configureAgents', () => {
       },
     ];
 
-    const spy = spyOn(fileUtil, 'loadMarkdownDir').mockReturnValue(mockMarkdownFiles as any);
+    const spy = spyOn(fileUtility, 'loadMarkdownDirectory').mockReturnValue(
+      mockMarkdownFiles as unknown as ReturnType<typeof fileUtility.loadMarkdownDirectory>,
+    );
 
     try {
       const config = {} as OpenCodeConfig;
@@ -148,8 +163,10 @@ describe('configureAgents', () => {
       spy.mockRestore();
     }
   });
+});
 
-  test('should catch and log error if prepareAgent throws', () => {
+describe('configureAgents error handling', () => {
+  test('catches and logs error if prepareAgent throws', () => {
     let accessCount = 0;
     const faultyMarkdown = {
       get data() {
@@ -160,7 +177,9 @@ describe('configureAgents', () => {
       content: 'Faulty content',
     };
 
-    const spy = spyOn(fileUtil, 'loadMarkdownDir').mockReturnValue([faultyMarkdown] as any);
+    const spy = spyOn(fileUtility, 'loadMarkdownDirectory').mockReturnValue([faultyMarkdown] as unknown as ReturnType<
+      typeof fileUtility.loadMarkdownDirectory
+    >);
     const consoleWarnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
     try {

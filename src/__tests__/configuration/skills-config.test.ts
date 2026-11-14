@@ -2,35 +2,37 @@ import { describe, expect, test } from 'bun:test';
 import matter from 'gray-matter';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { configureSkills } from '../../configuration/skills-config.js';
 import type { OpenCodeConfig } from '../../types/opencode-types.js';
-import { PLUGIN_ROOT } from '../../utils/plugin-info.js';
 
-describe('configureSkills', () => {
-  const expectedSkillsDir = path.join(PLUGIN_ROOT, 'skills');
+const pluginRootDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const expectedSkillsDirectory = path.join(pluginRootDirectory, 'skills');
 
-  test('should initialize skills and skills.paths when skills is undefined', () => {
+describe('configureSkills initialization', () => {
+  test('initializes skills and skills.paths when skills is undefined', () => {
     const config = {} as OpenCodeConfig;
     configureSkills(config);
 
     expect(config.skills).toBeDefined();
-    expect(config.skills.paths).toEqual([expectedSkillsDir]);
+    expect(config.skills.paths).toEqual([expectedSkillsDirectory]);
   });
 
-  test('should safely handle null/undefined config without throwing', () => {
-    expect(() => configureSkills(null as any)).not.toThrow();
-    expect(() => configureSkills(undefined as any)).not.toThrow();
+  test('safely handles undefined config without throwing', () => {
+    expect(() => configureSkills(undefined as unknown as OpenCodeConfig)).not.toThrow();
   });
 
-  test('should initialize skills.paths when skills object exists but skills.paths is undefined', () => {
+  test('initializes skills.paths when skills object exists but skills.paths is undefined', () => {
     const config = { skills: {} } as OpenCodeConfig;
     configureSkills(config);
 
-    expect(config.skills.paths).toEqual([expectedSkillsDir]);
+    expect(config.skills.paths).toEqual([expectedSkillsDirectory]);
   });
+});
 
-  test('should append skills directory to existing paths list without modifying existing entries', () => {
+describe('configureSkills paths mutation and skill content', () => {
+  test('appends skills directory to existing paths list without modifying existing entries', () => {
     const existingPath = '/custom/skills/path';
     const config = {
       skills: {
@@ -40,24 +42,24 @@ describe('configureSkills', () => {
 
     configureSkills(config);
 
-    expect(config.skills.paths).toEqual([existingPath, expectedSkillsDir]);
+    expect(config.skills.paths).toEqual([existingPath, expectedSkillsDirectory]);
   });
 
-  test('should not add duplicate skills directory if it is already present in skills.paths', () => {
+  test('does not add duplicate skills directory if it is already present in skills.paths', () => {
     const config = {
       skills: {
-        paths: [expectedSkillsDir],
+        paths: [expectedSkillsDirectory],
       },
     } as OpenCodeConfig;
 
     configureSkills(config);
 
-    expect(config.skills.paths).toEqual([expectedSkillsDir]);
-    expect(config.skills.paths.length).toBe(1);
+    expect(config.skills.paths).toEqual([expectedSkillsDirectory]);
+    expect(config.skills.paths).toHaveLength(1);
   });
 
-  test('should ship audio-video-transcription skill with valid frontmatter and subagent delegation instructions', () => {
-    const skillPath = path.join(expectedSkillsDir, 'audio-video-transcription', 'SKILL.md');
+  test('ships audio-video-transcription skill with valid frontmatter and subagent delegation instructions', () => {
+    const skillPath = path.join(expectedSkillsDirectory, 'audio-video-transcription', 'SKILL.md');
     expect(fs.existsSync(skillPath)).toBe(true);
 
     const parsed = matter(fs.readFileSync(skillPath, 'utf8'));

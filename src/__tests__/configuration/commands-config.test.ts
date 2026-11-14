@@ -2,10 +2,10 @@ import { describe, expect, spyOn, test } from 'bun:test';
 
 import { configureCommands } from '../../configuration/commands-config.js';
 import type { OpenCodeConfig } from '../../types/opencode-types.js';
-import * as fileUtil from '../../utils/file-util.js';
+import * as fileUtility from '../../utils/file-utility.js';
 
-describe('configureCommands', () => {
-  test('should initialize config.command and load commands from directory', () => {
+describe('configureCommands defaults and overrides', () => {
+  test('initializes config.command and loads commands from directory', () => {
     const config = {} as OpenCodeConfig;
     configureCommands(config);
 
@@ -18,12 +18,11 @@ describe('configureCommands', () => {
     expect(config.command.transcribe!.template).toContain('hint to check the saved transcription file');
   });
 
-  test('should safely handle null/undefined config without throwing', () => {
-    expect(() => configureCommands(null as any)).not.toThrow();
-    expect(() => configureCommands(undefined as any)).not.toThrow();
+  test('safely handles undefined config without throwing', () => {
+    expect(() => configureCommands(undefined as unknown as OpenCodeConfig)).not.toThrow();
   });
 
-  test('should not overwrite an existing command configured by user', () => {
+  test('does not overwrite an existing command configured by user', () => {
     const customCommand = {
       template: 'custom template',
       description: 'custom description',
@@ -38,8 +37,10 @@ describe('configureCommands', () => {
 
     expect(config.command.transcribe).toEqual(customCommand);
   });
+});
 
-  test('should parse command attributes including description, agent, model, and subtask', () => {
+describe('configureCommands markdown attribute parsing', () => {
+  test('parses command attributes including description, agent, model, and subtask', () => {
     const mockMarkdownFiles = [
       {
         data: {
@@ -60,14 +61,15 @@ describe('configureCommands', () => {
       },
       {
         data: {
-          // Missing name - should be skipped
           description: 'No name',
         },
         content: 'No name body',
       },
     ];
 
-    const spy = spyOn(fileUtil, 'loadMarkdownDir').mockReturnValue(mockMarkdownFiles as any);
+    const spy = spyOn(fileUtility, 'loadMarkdownDirectory').mockReturnValue(
+      mockMarkdownFiles as unknown as ReturnType<typeof fileUtility.loadMarkdownDirectory>,
+    );
 
     try {
       const config = {} as OpenCodeConfig;

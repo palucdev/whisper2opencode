@@ -1,4 +1,4 @@
-import fs from 'fs';
+import fs from 'node:fs';
 
 // Copy the 'skills' folder recursively into 'dist/skills'
 if (fs.existsSync('src/skills')) {

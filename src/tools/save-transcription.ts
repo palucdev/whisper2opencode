@@ -28,12 +28,12 @@ export const save_transcription = tool({
         'Non-empty sequence of timestamped words to save to the .txt file, with one "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" entry per row (as returned by the transcribe tool). May also include the leading --- metadata --- header block or raw transcribe header.',
       ),
   },
-  async execute(args, context) {
+  async execute(toolArguments, context) {
     return saveTranscriptionFile({
-      filePath: args.filePath,
-      content: args.content,
-      sourceFile: args.sourceFile,
-      duration: args.duration,
+      filePath: toolArguments.filePath,
+      content: toolArguments.content,
+      sourceFile: toolArguments.sourceFile,
+      duration: toolArguments.duration,
       directory: context.directory,
     });
   },

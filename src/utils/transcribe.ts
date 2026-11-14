@@ -1,451 +1,212 @@
-import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import type {
-  SaveTranscriptionOptions,
+  LoadWhisperFactoryOptions,
   TranscribeOptions,
   TranscriptionMediaResult,
   TranscriptionSegment,
   WhisperFactory,
+  WhisperInstance,
 } from '../types/whisper-types.js';
 import { SAMPLE_RATE, decodeAudioToFloat32, getFileType, resolveMediaFile } from './audio.js';
+import { fileSystem } from './file-system.js';
+import { resolveModelPath } from './model-resolver.js';
+import { SEGMENT_REGEX, formatMsToTimestamp, formatWordLines, parseTimestampToMs } from './transcription-formatter.js';
+
+export {
+  TIMESTAMPED_WORD_LINE_REGEX,
+  TRANSCRIPTION_METADATA_REGEX,
+  formatTranscriptionWithMetadata,
+  stripTranscriptionMetadata,
+} from './transcription-formatter.js';
+
+export { saveTranscriptionFile } from './transcription-saver.js';
 
 const require = createRequire(import.meta.url);
 
-const DEFAULT_MODEL_NAME = 'ggml-base.en.bin';
-const DEFAULT_MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${DEFAULT_MODEL_NAME}`;
-
-/**
- * Matches whisper.cpp stdout segment lines containing start/end timestamps and transcribed text.
- *
- * Example:
- *   "[00:00:00.000 --> 00:00:05.120] And so my fellow Americans"
- *
- * Captures:
- *   - match[1]: Start timestamp ("00:00:00.000")
- *   - match[2]: End timestamp ("00:00:05.120")
- *   - match[3]: Transcribed segment text ("And so my fellow Americans")
- */
-const SEGMENT_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
-
-/**
- * Matches a single timestamped word entry in transcription body content.
- *
- * Example:
- *   "[00:00:00.000 --> 00:00:00.120] And"
- *
- * Captures:
- *   - match[1]: Start timestamp ("00:00:00.000")
- *   - match[2]: End timestamp ("00:00:00.120")
- *   - match[3]: Non-whitespace word token ("And")
- */
-export const TIMESTAMPED_WORD_LINE_REGEX = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(\S+)$/;
-
-/**
- * Matches the leading YAML frontmatter metadata block delimited by `---` in transcription text files.
- *
- * Example:
- *   ---
- *   source_file: interview.wav
- *   duration: 00:01:23.456 (83.46s)
- *   ---
- *
- * Captures:
- *   - match[1]: YAML metadata content block ("source_file: interview.wav\nduration: 00:01:23.456 (83.46s)")
- */
-export const TRANSCRIPTION_METADATA_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n*/;
-
-/**
- * Matches raw plain-text metadata headers produced by the transcribe tool or legacy formats.
- *
- * Example:
- *   Filename: interview.wav
- *   File type: audio/wav
- *   Duration: 00:01:23.456 (83.46s)
- *
- * Captures:
- *   - match[1]: Source filename ("interview.wav")
- *   - match[2]: Duration string ("00:01:23.456 (83.46s)")
- */
-const RAW_METADATA_HEADER_REGEX =
-  /^(?:Filename|Source file|source_file):\s*(.+)\r?\n(?:File type:\s*.+\r?\n)?(?:Duration|duration):\s*(.+)(?:\r?\n)+/i;
+const MILLISECONDS_PER_SECOND = 1000;
+const DURATION_DECIMAL_PLACES = 2;
+const TAIL_ERROR_LINES_COUNT = 3;
 
 const transcriptionCache = new Map<string, TranscriptionMediaResult>();
 
-function parseTimestampToMs(timestamp: string): number {
-  const match = /^(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/.exec(timestamp.trim());
-  if (!match) return 0;
-  return (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000 + Number(match[4]);
-}
-
-function formatMsToTimestamp(ms: number): string {
-  const clamped = Math.max(0, Math.round(ms));
-  const hours = Math.floor(clamped / 3_600_000);
-  const minutes = Math.floor((clamped % 3_600_000) / 60_000);
-  const seconds = Math.floor((clamped % 60_000) / 1000);
-  const millis = clamped % 1000;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
-}
-
-async function resolveModelPath(customModelPath: string | undefined, baseDir: string): Promise<string> {
-  const configured = customModelPath ?? process.env.WHISPER_MODEL_PATH;
-  if (configured) {
-    const resolved = path.isAbsolute(configured) ? configured : path.resolve(baseDir, configured);
-    if (!fs.existsSync(resolved)) {
-      throw new Error(
-        `Whisper model file not found at: ${resolved}. Hint: Omit 'modelPath' to automatically use the default model (${DEFAULT_MODEL_NAME}), or verify the path to your local whisper.cpp GGML .bin model file.`,
-      );
-    }
-    const stat = fs.statSync(resolved);
-    if (stat.isDirectory() || stat.size === 0) {
-      throw new Error(
-        `Whisper model path is invalid (${stat.isDirectory() ? 'is a directory' : 'file is empty'}): ${resolved}. Hint: Provide a valid non-empty whisper.cpp GGML .bin model file or omit 'modelPath' to use the default model.`,
-      );
-    }
-    return resolved;
+const loadFactoryFromTarget = (targetDirectory?: string): WhisperFactory | undefined => {
+  if (!targetDirectory) {
+    return undefined;
   }
-
-  const cacheDir = path.join(os.homedir(), '.cache', 'whisper2opencode');
-  const cachedModelPath = path.join(cacheDir, DEFAULT_MODEL_NAME);
-  if (fs.existsSync(cachedModelPath)) {
-    return cachedModelPath;
-  }
-
-  fs.mkdirSync(cacheDir, { recursive: true });
-  let response: Response;
   try {
-    response = await fetch(DEFAULT_MODEL_URL);
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `Failed to download default model from ${DEFAULT_MODEL_URL} (${detail}).\n\n` +
-        "Hint: Use the 'download_whisper_cpp' tool to download the required speech model, or download it manually into your environment:\n" +
-        '  mkdir -p ~/.cache/whisper2opencode\n' +
-        '  curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
-        '    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
-        'Or set the WHISPER_MODEL_PATH environment variable to a local GGML .bin model file:\n' +
-        '  export WHISPER_MODEL_PATH="/path/to/ggml-base.en.bin"',
-    );
+    const localRequire = createRequire(path.join(path.resolve(targetDirectory), 'noop.js'));
+    const loaded = localRequire('whisper.cpp');
+    return typeof loaded === 'function' ? (loaded as WhisperFactory) : undefined;
+  } catch {
+    return undefined;
   }
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download default model (${response.status} ${response.statusText}).\n\n` +
-        "Hint: Use the 'download_whisper_cpp' tool to download the required speech model, or download it manually into your environment:\n" +
-        '  mkdir -p ~/.cache/whisper2opencode\n' +
-        '  curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
-        '    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
-        'Or set the WHISPER_MODEL_PATH environment variable to a local GGML .bin model file:\n' +
-        '  export WHISPER_MODEL_PATH="/path/to/ggml-base.en.bin"',
-    );
-  }
+};
 
-  const tmpPath = `${cachedModelPath}.tmp-${process.pid}`;
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(tmpPath, buffer);
-  fs.renameSync(tmpPath, cachedModelPath);
-  return cachedModelPath;
+const resolveFactory = (options: LoadWhisperFactoryOptions, moduleLoader: (identifier: string) => unknown): WhisperFactory | undefined => {
+  if (options.overrideFactory !== undefined) {
+    return typeof options.overrideFactory === 'function' ? (options.overrideFactory as WhisperFactory) : undefined;
+  }
+  try {
+    const loaded = moduleLoader('whisper.cpp');
+    if (typeof loaded === 'function') {
+      return loaded as WhisperFactory;
+    }
+  } catch {
+    // Fall through to checking targetDirectory
+  }
+  return loadFactoryFromTarget(options.targetDirectory);
+};
+
+const WHISPER_PACKAGE_MISSING_MESSAGE =
+  "Package 'whisper.cpp' is required for transcription, but was not found or could not be loaded in your environment.\n\n" +
+  "Hint: Run the 'download_whisper_cpp' tool to automatically download and set up whisper.cpp and the default speech model for your current setup:\n" +
+  '  - Tool call: download_whisper_cpp({})\n\n' +
+  'Or manually install whisper.cpp in your plugin or project directory:\n' +
+  '   - Bun: bun add whisper.cpp\n' +
+  '   - Node: npm install whisper.cpp\n\n' +
+  '2. Download a GGML model file (.bin):\n' +
+  '   - For English (default, ~142MB):\n' +
+  '     mkdir -p ~/.cache/whisper2opencode\n' +
+  '     curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
+  '       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
+  '   - For Multilingual (e.g. Polish, Spanish, German):\n' +
+  '     curl -L -o ~/.cache/whisper2opencode/ggml-base.bin \\\n' +
+  '       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin\n\n' +
+  '3. (Optional) Point to a custom model path via environment variable:\n' +
+  '   export WHISPER_MODEL_PATH="~/.cache/whisper2opencode/ggml-base.en.bin"';
+
+const isOptionsObject = (candidate: unknown): candidate is LoadWhisperFactoryOptions =>
+  Boolean(candidate) &&
+  typeof candidate === 'object' &&
+  !Array.isArray(candidate) &&
+  ('overrideFactory' in (candidate as object) || 'moduleLoader' in (candidate as object) || 'targetDirectory' in (candidate as object));
+
+export function loadWhisperFactory(factoryOrOptions?: LoadWhisperFactoryOptions | unknown, ...restArguments: unknown[]): WhisperFactory {
+  const options: LoadWhisperFactoryOptions = isOptionsObject(factoryOrOptions)
+    ? (factoryOrOptions as LoadWhisperFactoryOptions)
+    : {
+        overrideFactory: factoryOrOptions,
+        moduleLoader: typeof restArguments[0] === 'function' ? (restArguments[0] as (id: string) => unknown) : require,
+        targetDirectory: typeof restArguments[1] === 'string' ? restArguments[1] : undefined,
+      };
+
+  const loader = options.moduleLoader ?? require;
+  const factory = resolveFactory(options, loader);
+  if (!factory) {
+    throw new Error(WHISPER_PACKAGE_MISSING_MESSAGE);
+  }
+  return factory;
 }
 
-function formatWordLines(segments: TranscriptionSegment[]): string[] {
-  const lines: string[] = [];
-  const tokenRegex = /\S+/g;
-
-  for (const seg of segments) {
-    for (const match of seg.text.matchAll(tokenRegex)) {
-      const rawToken = match[0];
-      if (/^\[.*\]$/.test(rawToken)) continue;
-
-      const cleanWord = rawToken.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
-      if (!cleanWord) continue;
-
-      const tokenStart = match.index ?? 0;
-      const tokenEnd = tokenStart + rawToken.length;
-      const startRatio = seg.text.length > 0 ? tokenStart / seg.text.length : 0;
-      const endRatio = seg.text.length > 0 ? tokenEnd / seg.text.length : 1;
-
-      const startMs = Math.round(seg.startMs + startRatio * (seg.endMs - seg.startMs));
-      const endMs = Math.max(startMs, Math.round(seg.startMs + endRatio * (seg.endMs - seg.startMs)));
-
-      lines.push(`[${formatMsToTimestamp(startMs)} --> ${formatMsToTimestamp(endMs)}] ${cleanWord}`);
-    }
-  }
-
-  return lines;
+interface WhisperInferenceParameters {
+  whisperFactory: WhisperFactory;
+  modelData: Buffer;
+  pcm: Float32Array;
+  language: string;
+  resolvedModelPath: string;
 }
 
-export function loadWhisperFactory(overrideFactory?: unknown, moduleLoader: (id: string) => unknown = require, targetDir?: string): WhisperFactory {
-  if (overrideFactory !== undefined) {
-    if (typeof overrideFactory === 'function') {
-      return overrideFactory as WhisperFactory;
+const parseSegmentLines = (stdoutLines: readonly string[]): TranscriptionSegment[] => {
+  const segments: TranscriptionSegment[] = [];
+  for (const line of stdoutLines) {
+    const match = SEGMENT_REGEX.exec(line.trim());
+    if (!match?.[1] || !match[2] || !match[3]) {
+      continue;
     }
-  } else {
-    try {
-      const loaded = moduleLoader('whisper.cpp');
-      if (typeof loaded === 'function') {
-        return loaded as WhisperFactory;
-      }
-    } catch {
-      // Fall through to checking targetDir below
+    const text = match[3].trim();
+    if (text.length === 0) {
+      continue;
     }
+    segments.push({
+      startMs: parseTimestampToMs(match[1]),
+      endMs: parseTimestampToMs(match[2]),
+      text,
+    });
+  }
+  return segments;
+};
 
-    if (targetDir) {
-      try {
-        const localRequire = createRequire(path.join(path.resolve(targetDir), 'noop.js'));
-        const loaded = localRequire('whisper.cpp');
-        if (typeof loaded === 'function') {
-          return loaded as WhisperFactory;
-        }
-      } catch {
-        // Fall through to descriptive error below
-      }
-    }
+const executeWhisperSession = (
+  whisper: WhisperInstance,
+  context: { parameters: WhisperInferenceParameters; stderrLines: readonly string[] },
+): void => {
+  whisper.FS_createDataFile('/', 'whisper.bin', context.parameters.modelData, true, true);
+  if (!whisper.init('whisper.bin')) {
+    throw new Error(
+      `whisper.cpp failed to initialize model from "${context.parameters.resolvedModelPath}". Hint: Ensure the model is a valid whisper.cpp GGML .bin file (not PyTorch/ONNX/Safetensors). If using the cached default model, delete "${context.parameters.resolvedModelPath}" and retry so it re-downloads.`,
+    );
   }
 
+  const code = whisper.full_default(context.parameters.pcm, context.parameters.language, false);
+  if (code === 0) {
+    return;
+  }
+
+  const errorDetail = context.stderrLines.slice(-TAIL_ERROR_LINES_COUNT).join(' | ');
+  const detailSuffix = errorDetail ? ` (${errorDetail})` : '';
   throw new Error(
-    "Package 'whisper.cpp' is required for transcription, but was not found or could not be loaded in your environment.\n\n" +
-      "Hint: Run the 'download_whisper_cpp' tool to automatically download and set up whisper.cpp and the default speech model for your current setup:\n" +
-      '  - Tool call: download_whisper_cpp({})\n\n' +
-      'Or manually install whisper.cpp in your plugin or project directory:\n' +
-      '   - Bun: bun add whisper.cpp\n' +
-      '   - Node: npm install whisper.cpp\n\n' +
-      '2. Download a GGML model file (.bin):\n' +
-      '   - For English (default, ~142MB):\n' +
-      '     mkdir -p ~/.cache/whisper2opencode\n' +
-      '     curl -L -o ~/.cache/whisper2opencode/ggml-base.en.bin \\\n' +
-      '       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin\n' +
-      '   - For Multilingual (e.g. Polish, Spanish, German):\n' +
-      '     curl -L -o ~/.cache/whisper2opencode/ggml-base.bin \\\n' +
-      '       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin\n\n' +
-      '3. (Optional) Point to a custom model path via environment variable:\n' +
-      '   export WHISPER_MODEL_PATH="~/.cache/whisper2opencode/ggml-base.en.bin"',
+    `whisper.cpp transcription failed with code ${code}${detailSuffix}. Hint: Check that 'language' ("${context.parameters.language}") is a valid ISO 639-1 code (e.g. 'en', 'pl', 'de', 'es'). For non-English audio, provide a multilingual GGML model (e.g. ggml-base.bin) via 'modelPath'.`,
   );
-}
+};
+
+const runWhisperInference = async (parameters: WhisperInferenceParameters): Promise<TranscriptionSegment[]> => {
+  const stdoutLines: string[] = [];
+  const stderrLines: string[] = [];
+
+  const whisper = await parameters.whisperFactory({
+    print: (text: string) => {
+      stdoutLines.push(text);
+    },
+    printErr: (text: string) => {
+      stderrLines.push(text);
+    },
+  });
+
+  try {
+    executeWhisperSession(whisper, { parameters, stderrLines });
+  } finally {
+    whisper.free();
+    whisper.PThread?.terminateAllThreads();
+  }
+
+  return parseSegmentLines(stdoutLines);
+};
 
 export async function transcribeAudioFile(options: TranscribeOptions): Promise<string> {
-  const baseDir = options.directory ?? process.cwd();
-  const { resolvedPath: resolvedInputPath, stat } = resolveMediaFile(options.filePath, baseDir, 'filePath');
-  const resolvedModelPath = await resolveModelPath(options.modelPath, baseDir);
+  const baseDirectory = options.directory ?? process.cwd();
+  const { resolvedPath: resolvedInputPath, stat } = resolveMediaFile(options.filePath, baseDirectory, 'filePath');
+  const resolvedModelPath = await resolveModelPath(options.modelPath, baseDirectory);
   const language = options.language?.trim() || 'en';
   const cacheKey = `${resolvedInputPath}:${stat.mtimeMs}:${stat.size}:${language}:${resolvedModelPath}`;
 
   let result = transcriptionCache.get(cacheKey);
   if (!result) {
-    const modelData = fs.readFileSync(resolvedModelPath);
+    const modelData = fileSystem.readFileSync(resolvedModelPath);
     const pcm = decodeAudioToFloat32(resolvedInputPath);
-    const durationMs = Math.round((pcm.length / SAMPLE_RATE) * 1000);
+    const durationMs = Math.round((pcm.length / SAMPLE_RATE) * MILLISECONDS_PER_SECOND);
+    const whisperFactory = loadWhisperFactory(options.whisperFactory, require, baseDirectory);
 
-    const whisperFactory = loadWhisperFactory(options.whisperFactory, require, baseDir);
-    const stdoutLines: string[] = [];
-    const stderrLines: string[] = [];
-
-    const whisper = await whisperFactory({
-      print: (text: string) => stdoutLines.push(text),
-      printErr: (text: string) => stderrLines.push(text),
+    const segments = await runWhisperInference({
+      whisperFactory,
+      modelData,
+      pcm,
+      language,
+      resolvedModelPath,
     });
-
-    try {
-      whisper.FS_createDataFile('/', 'whisper.bin', modelData, true, true);
-      if (!whisper.init('whisper.bin')) {
-        throw new Error(
-          `whisper.cpp failed to initialize model from "${resolvedModelPath}". Hint: Ensure the model is a valid whisper.cpp GGML .bin file (not PyTorch/ONNX/Safetensors). If using the cached default model, delete "${resolvedModelPath}" and retry so it re-downloads.`,
-        );
-      }
-
-      const code = whisper.full_default(pcm, language, false);
-      if (code !== 0) {
-        const errDetail = stderrLines.slice(-3).join(' | ');
-        throw new Error(
-          `whisper.cpp transcription failed with code ${code}${errDetail ? ` (${errDetail})` : ''}. Hint: Check that 'language' ("${language}") is a valid ISO 639-1 code (e.g. 'en', 'pl', 'de', 'es'). For non-English audio, provide a multilingual GGML model (e.g. ggml-base.bin) via 'modelPath'.`,
-        );
-      }
-    } finally {
-      whisper.free();
-      whisper.PThread?.terminateAllThreads();
-    }
-
-    const segments: TranscriptionSegment[] = [];
-    for (const line of stdoutLines) {
-      const match = SEGMENT_REGEX.exec(line.trim());
-      if (match?.[1] && match[2] && match[3]) {
-        const text = match[3].trim();
-        if (text.length > 0) {
-          segments.push({
-            startMs: parseTimestampToMs(match[1]),
-            endMs: parseTimestampToMs(match[2]),
-            text,
-          });
-        }
-      }
-    }
 
     result = { segments, durationMs };
     transcriptionCache.set(cacheKey, result);
   }
 
   const clampedDurationMs = Math.max(0, Math.round(result.durationMs));
+  const secondsString = (clampedDurationMs / MILLISECONDS_PER_SECOND).toFixed(DURATION_DECIMAL_PLACES);
   const headerLines = [
     `Filename: ${path.basename(resolvedInputPath)}`,
     `File type: ${getFileType(resolvedInputPath)}`,
-    `Duration: ${formatMsToTimestamp(clampedDurationMs)} (${(clampedDurationMs / 1000).toFixed(2)}s)`,
+    `Duration: ${formatMsToTimestamp(clampedDurationMs)} (${secondsString}s)`,
   ];
   const wordLines = formatWordLines(result.segments);
 
   return wordLines.length > 0 ? `${headerLines.join('\n')}\n\n${wordLines.join('\n')}` : headerLines.join('\n');
-}
-
-function stripSurroundingQuotes(value: string): string {
-  const trimmed = value.trim();
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
-}
-
-function extractMetadataAndBody(rawContent: string): {
-  sourceFile?: string;
-  duration?: string;
-  body: string;
-} {
-  const trimmed = rawContent.trim();
-  const frontmatterMatch = TRANSCRIPTION_METADATA_REGEX.exec(trimmed);
-  if (frontmatterMatch) {
-    const metadataBlock = frontmatterMatch[1] ?? '';
-    const body = trimmed.slice(frontmatterMatch[0].length).trim();
-    let sourceFile: string | undefined;
-    let duration: string | undefined;
-
-    for (const line of metadataBlock.split(/\r?\n/)) {
-      const sourceMatch = /^(?:source_file|sourceFile|source file|filename|file):\s*(.+)$/i.exec(line.trim());
-      if (sourceMatch?.[1]) {
-        sourceFile = stripSurroundingQuotes(sourceMatch[1]);
-        continue;
-      }
-      const durationMatch = /^duration:\s*(.+)$/i.exec(line.trim());
-      if (durationMatch?.[1]) {
-        duration = stripSurroundingQuotes(durationMatch[1]);
-      }
-    }
-
-    return { sourceFile, duration, body };
-  }
-
-  const rawHeaderMatch = RAW_METADATA_HEADER_REGEX.exec(trimmed);
-  if (rawHeaderMatch?.[1] && rawHeaderMatch[2]) {
-    const sourceFile = stripSurroundingQuotes(rawHeaderMatch[1]);
-    const duration = stripSurroundingQuotes(rawHeaderMatch[2]);
-    const body = trimmed.slice(rawHeaderMatch[0].length).trim();
-    return { sourceFile, duration, body };
-  }
-
-  return { body: trimmed };
-}
-
-export function stripTranscriptionMetadata(content: string): string {
-  return content.replace(TRANSCRIPTION_METADATA_REGEX, '');
-}
-
-export function formatTranscriptionWithMetadata(options: { content: string; sourceFile?: string; duration?: string }): string {
-  const extracted = extractMetadataAndBody(options.content);
-  const rawLines = extracted.body
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (rawLines.length === 0) {
-    throw new Error(
-      "Missing or empty transcription body in 'content'. Hint: Provide non-empty timestamped word lines in addition to the metadata header.",
-    );
-  }
-
-  const rawSourceFile = options.sourceFile?.trim() || extracted.sourceFile?.trim();
-  if (!rawSourceFile) {
-    throw new Error(
-      "Missing required source file metadata ('sourceFile'). Hint: Provide 'sourceFile' (e.g. 'jfk.wav') or include 'source_file: <filename>' in a leading --- metadata --- block.",
-    );
-  }
-
-  const resolvedDuration = options.duration?.trim() || extracted.duration?.trim();
-  if (!resolvedDuration) {
-    throw new Error(
-      "Missing required audio/video duration metadata ('duration'). Hint: Provide 'duration' (e.g. '00:00:11.000 (11.00s)') or include 'duration: <duration>' in a leading --- metadata --- block.",
-    );
-  }
-
-  const normalizedWordLines: string[] = [];
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i]!;
-    const match = TIMESTAMPED_WORD_LINE_REGEX.exec(line);
-    if (!match?.[1] || !match[2] || !match[3]) {
-      throw new Error(
-        `Invalid transcription body format at line ${i + 1}: "${line}". Saved transcriptions must be a sequence of timestamped words with one "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" entry per row. Hint: Pass the exact "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" lines from the 'transcribe' tool output instead of reconstructed sentences or plain prose.`,
-      );
-    }
-    normalizedWordLines.push(`[${match[1]} --> ${match[2]}] ${match[3]}`);
-  }
-
-  const resolvedSourceFile = path.basename(rawSourceFile);
-  return `---\nsource_file: ${resolvedSourceFile}\nduration: ${resolvedDuration}\n---\n\n${normalizedWordLines.join('\n')}`;
-}
-
-export function saveTranscriptionFile(options: SaveTranscriptionOptions): string {
-  const baseDir = path.resolve(options.directory ?? process.cwd());
-  const rawFilePath = options.filePath?.trim();
-  if (!rawFilePath) {
-    throw new Error(
-      "Missing required 'filePath' argument. Hint: Provide a relative '.txt' file path inside the working directory (e.g. 'transcription.txt').",
-    );
-  }
-
-  if (typeof options.content !== 'string' || !options.content.trim()) {
-    throw new Error("Missing or empty 'content' argument. Hint: Provide the non-empty transcription text to save.");
-  }
-
-  const candidatePath = path.isAbsolute(rawFilePath) ? path.resolve(rawFilePath) : path.resolve(baseDir, rawFilePath);
-
-  const relativeToBase = path.relative(baseDir, candidatePath);
-  if (!relativeToBase || relativeToBase.startsWith('..') || path.isAbsolute(relativeToBase)) {
-    throw new Error(
-      `Output path "${candidatePath}" is outside the working directory "${baseDir}". Hint: Provide a relative '.txt' file path inside the current working directory without '..' traversal.`,
-    );
-  }
-
-  const segments = relativeToBase.split(/[/\\]/);
-  if (segments.some((seg) => seg.startsWith('.'))) {
-    throw new Error(
-      `Output path "${candidatePath}" cannot target hidden files or directories. Hint: Provide a standard '.txt' filename inside the working directory.`,
-    );
-  }
-
-  const ext = path.extname(candidatePath);
-  let resolvedOutputPath: string;
-  if (ext === '') {
-    resolvedOutputPath = `${candidatePath}.txt`;
-  } else if (ext.toLowerCase() !== '.txt') {
-    throw new Error(
-      `Invalid transcription file extension "${ext}" for "${candidatePath}". Only ".txt" transcription files are allowed. Hint: Use a ".txt" file extension (e.g. "${path.basename(candidatePath, ext)}.txt").`,
-    );
-  } else {
-    resolvedOutputPath = candidatePath;
-  }
-
-  if (fs.existsSync(resolvedOutputPath)) {
-    throw new Error(
-      `Transcription file already exists: ${resolvedOutputPath}. Existing files cannot be modified or overwritten. Hint: Choose a new, non-existent '.txt' filename within the working directory.`,
-    );
-  }
-
-  const formattedContent = formatTranscriptionWithMetadata({
-    content: options.content,
-    sourceFile: options.sourceFile,
-    duration: options.duration,
-  });
-
-  fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
-  fs.writeFileSync(resolvedOutputPath, formattedContent, {
-    encoding: 'utf8',
-    flag: 'wx',
-  });
-
-  return resolvedOutputPath;
 }

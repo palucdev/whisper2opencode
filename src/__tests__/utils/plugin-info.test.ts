@@ -1,71 +1,68 @@
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { PLUGIN_VERSION, readPluginVersion } from '../../utils/plugin-info.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.join(__dirname, '../../..');
+const repositoryRoot = path.join(__dirname, '../../..');
+const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'plugin-info');
 
-describe('plugin-info', () => {
-  let tmpDir: string;
+const makePluginRoot = (packageJsonContent?: string): string => {
+  const root = path.join(TEST_ROOT, 'dist');
+  fs.mkdirSync(root, { recursive: true });
+  if (packageJsonContent !== undefined) {
+    fs.writeFileSync(path.join(TEST_ROOT, 'package.json'), packageJsonContent, 'utf8');
+  }
+  return root;
+};
 
-  const makePluginRoot = (packageJson: string | null): string => {
-    const root = path.join(tmpDir, 'dist');
-    fs.mkdirSync(root, { recursive: true });
-    if (packageJson !== null) {
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), packageJson, 'utf8');
-    }
-    return root;
-  };
-
+describe('plugin-info version resolution', () => {
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whisper2opencode-plugin-info-test-'));
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+    fs.mkdirSync(TEST_ROOT, { recursive: true });
   });
 
   afterEach(() => {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
   });
 
-  describe('PLUGIN_VERSION', () => {
-    test('should match the version in the repository package.json', () => {
-      const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string };
-      expect(PLUGIN_VERSION).toBe(pkg.version);
-    });
-
-    test('should resolve from the default plugin root', () => {
-      expect(readPluginVersion()).toBe(PLUGIN_VERSION);
-    });
+  test('matches the version in the repository package.json', () => {
+    const packageJsonPath = path.join(repositoryRoot, 'package.json');
+    const packageContent = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string };
+    expect(PLUGIN_VERSION).toBe(packageContent.version);
   });
 
-  describe('readPluginVersion', () => {
-    test('should read the version from package.json above the plugin root', () => {
-      const root = makePluginRoot(JSON.stringify({ version: '1.2.3' }));
-      expect(readPluginVersion(root)).toBe('1.2.3');
-    });
+  test('resolves from the default plugin root', () => {
+    expect(readPluginVersion()).toBe(PLUGIN_VERSION);
+  });
 
-    test("should return 'unknown' when package.json is missing", () => {
-      const root = makePluginRoot(null);
-      expect(readPluginVersion(root)).toBe('unknown');
-    });
+  test('reads the version from package.json above the plugin root', () => {
+    const root = makePluginRoot(JSON.stringify({ version: '1.2.3' }));
+    expect(readPluginVersion(root)).toBe('1.2.3');
+  });
 
-    test("should return 'unknown' when package.json is not valid JSON", () => {
-      const root = makePluginRoot('not-json{');
-      expect(readPluginVersion(root)).toBe('unknown');
-    });
+  test("returns 'unknown' when package.json is missing", () => {
+    const root = makePluginRoot();
+    expect(readPluginVersion(root)).toBe('unknown');
+  });
 
-    test("should return 'unknown' when the version field is absent", () => {
-      const root = makePluginRoot(JSON.stringify({ name: 'whisper2opencode' }));
-      expect(readPluginVersion(root)).toBe('unknown');
-    });
+  test("returns 'unknown' when package.json is not valid JSON", () => {
+    const root = makePluginRoot('not-json{');
+    expect(readPluginVersion(root)).toBe('unknown');
+  });
 
-    test("should return 'unknown' when the version field is not a non-empty string", () => {
-      expect(readPluginVersion(makePluginRoot(JSON.stringify({ version: 123 })))).toBe('unknown');
-      expect(readPluginVersion(makePluginRoot(JSON.stringify({ version: '' })))).toBe('unknown');
-    });
+  test("returns 'unknown' when the version field is absent", () => {
+    const root = makePluginRoot(JSON.stringify({ name: 'whisper2opencode' }));
+    expect(readPluginVersion(root)).toBe('unknown');
+  });
+
+  test("returns 'unknown' when the version field is not a non-empty string", () => {
+    const invalidNumberVersionRoot = makePluginRoot(JSON.stringify({ version: 123 }));
+    expect(readPluginVersion(invalidNumberVersionRoot)).toBe('unknown');
+
+    const emptyStringVersionRoot = makePluginRoot(JSON.stringify({ version: '' }));
+    expect(readPluginVersion(emptyStringVersionRoot)).toBe('unknown');
   });
 });

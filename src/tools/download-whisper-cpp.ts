@@ -18,12 +18,12 @@ export const download_whisper_cpp = tool({
     skipModel: tool.schema.boolean().optional().describe('Whether to skip downloading the GGML speech model (default: false)'),
     directory: tool.schema.string().optional().describe('Target directory for installation (default: current working directory)'),
   },
-  async execute(args, context) {
+  async execute(toolArguments, context) {
     const result = await downloadWhisperSetup({
-      packageManager: args.packageManager,
-      modelName: args.modelName,
-      skipModel: args.skipModel,
-      directory: args.directory ?? context.directory,
+      packageManager: toolArguments.packageManager,
+      modelName: toolArguments.modelName,
+      skipModel: toolArguments.skipModel,
+      directory: toolArguments.directory ?? context.directory,
     });
     return result.summary;
   },

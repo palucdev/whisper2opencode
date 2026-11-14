@@ -1,22 +1,27 @@
-import type { OpenCodeConfig } from '../types/opencode-types.js';
-import { loadMarkdownDir } from '../utils/file-util.js';
+import type { OpenCodeCommand, OpenCodeConfig } from '../types/opencode-types.js';
+import { loadMarkdownDirectory } from '../utils/file-utility.js';
+
+const parseSubtask = (rawSubtask: unknown): boolean | undefined =>
+  rawSubtask === undefined ? undefined : rawSubtask === 'true' || rawSubtask === true;
+
+const buildCommand = (data: Record<string, unknown>, content: string): OpenCodeCommand => {
+  const subtask = parseSubtask(data.subtask);
+  return {
+    template: content.trim(),
+    ...(typeof data.description === 'string' && { description: data.description }),
+    ...(typeof data.agent === 'string' && { agent: data.agent }),
+    ...(typeof data.model === 'string' && { model: data.model }),
+    ...(subtask !== undefined && { subtask }),
+  };
+};
 
 export const configureCommands = (config: OpenCodeConfig): void => {
   if (!config || typeof config !== 'object') return;
-  config.command = config.command || {};
-  for (const { data, content } of loadMarkdownDir('commands')) {
-    const name = data.name;
-    if (!name) continue;
+  config.command ||= {};
+  for (const { data, content } of loadMarkdownDirectory('commands')) {
+    const name = typeof data.name === 'string' ? data.name : undefined;
     // Don't overwrite commands the user has explicitly configured
-    if (config.command[name]) continue;
-    config.command[name] = {
-      template: content.trim(),
-      ...(data.description && { description: data.description }),
-      ...(data.agent && { agent: data.agent }),
-      ...(data.model && { model: data.model }),
-      ...(data.subtask !== undefined && {
-        subtask: data.subtask === 'true' || data.subtask === true,
-      }),
-    };
+    if (!name || Object.hasOwn(config.command, name)) continue;
+    Reflect.set(config.command, name, buildCommand(data, content));
   }
 };

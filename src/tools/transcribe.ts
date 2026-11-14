@@ -9,11 +9,11 @@ export const transcribe = tool({
     language: tool.schema.string().optional().describe("Language code for transcription (default: 'en')"),
     modelPath: tool.schema.string().optional().describe('Optional path to a local whisper.cpp GGML .bin model file'),
   },
-  async execute(args, context) {
+  async execute(toolArguments, context) {
     return transcribeAudioFile({
-      filePath: args.filePath,
-      language: args.language,
-      modelPath: args.modelPath,
+      filePath: toolArguments.filePath,
+      language: toolArguments.language,
+      modelPath: toolArguments.modelPath,
       directory: context.directory,
     });
   },
