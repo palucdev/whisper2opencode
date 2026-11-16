@@ -1,7 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import fs from 'node:fs';
-import path from 'node:path';
-import type { PluginInput } from '@opencode-ai/plugin';
+import { describe, expect, spyOn, test } from 'bun:test';
+import type { Config } from '@opencode-ai/plugin';
 
 import * as agentsConfig from '../configuration/agents-config.js';
 import * as commandsConfig from '../configuration/commands-config.js';
@@ -13,28 +11,10 @@ import { save_transcription } from '../tools/save-transcription.js';
 import { transcribe } from '../tools/transcribe.js';
 import type { OpenCodeConfig } from '../types/opencode-types.js';
 
-const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'plugin-index');
+describe('WhisperPlugin', () => {
+  test('registers tools and lifecycle hooks', async () => {
+    const plugin = await WhisperPlugin();
 
-const mockPluginInput = (): PluginInput =>
-  ({
-    directory: TEST_ROOT,
-    worktree: TEST_ROOT,
-    serverUrl: new URL('http://localhost'),
-  }) as unknown as PluginInput;
-
-describe('WhisperPlugin tool registration', () => {
-  beforeEach(() => {
-    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
-    fs.mkdirSync(TEST_ROOT, { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
-  });
-
-  test('exports default plugin factory and registers tools', async () => {
-    const plugin = await WhisperPlugin(mockPluginInput());
-    expect(plugin).toBeDefined();
     expect(plugin.tool?.transcribe).toBe(transcribe);
     expect(plugin.tool?.convert_audio).toBe(convert_audio);
     expect(plugin.tool?.save_transcription).toBe(save_transcription);
@@ -44,34 +24,17 @@ describe('WhisperPlugin tool registration', () => {
     expect(typeof plugin.dispose).toBe('function');
   });
 
-  test('works when invoked with empty / default arguments', async () => {
-    const plugin = await WhisperPlugin();
-    expect(plugin).toBeDefined();
-    expect(typeof plugin.config).toBe('function');
-  });
-});
-
-describe('WhisperPlugin hooks', () => {
-  beforeEach(() => {
-    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
-    fs.mkdirSync(TEST_ROOT, { recursive: true });
-  });
-
-  afterEach(() => {
-    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
-  });
-
-  test('configures skills, commands, and agents from config hook', async () => {
+  test('config hook installs skills, commands, and agents', async () => {
     const skillsSpy = spyOn(skillsConfig, 'configureSkills').mockImplementation(() => {});
     const commandsSpy = spyOn(commandsConfig, 'configureCommands').mockImplementation(() => {});
     const agentsSpy = spyOn(agentsConfig, 'configureAgents').mockImplementation(() => {});
     const consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {});
 
     try {
-      const plugin = await WhisperPlugin(mockPluginInput());
+      const plugin = await WhisperPlugin();
       const inputConfig: OpenCodeConfig = { agent: {}, command: {}, skills: {} };
 
-      await plugin.config!(inputConfig as unknown);
+      await plugin.config!(inputConfig as unknown as Config);
 
       expect(skillsSpy).toHaveBeenCalledWith(inputConfig);
       expect(commandsSpy).toHaveBeenCalledWith(inputConfig);
@@ -84,8 +47,8 @@ describe('WhisperPlugin hooks', () => {
     }
   });
 
-  test('executes dispose hook cleanly without error', async () => {
-    const plugin = await WhisperPlugin(mockPluginInput());
+  test('disposes cleanly', async () => {
+    const plugin = await WhisperPlugin();
     await expect(plugin.dispose?.()).resolves.toBeUndefined();
   });
 });

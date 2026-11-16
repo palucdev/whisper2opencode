@@ -25,12 +25,12 @@ describe('file-utility loadMarkdownDirectory: mocked scenarios', () => {
   test('parses mocked markdown files and ignores non-markdown files', () => {
     const mockFiles = ['doc1.md', 'doc2.md', 'ignore.txt'];
     const readdirSpy = spyOn(fileSystem, 'readdirSync').mockReturnValue(mockFiles as unknown as ReturnType<typeof fileSystem.readdirSync>);
-    const readFileSpy = spyOn(fileSystem, 'readFileSync').mockImplementation((filePath: unknown) => {
+    const readFileSpy = spyOn(fileSystem, 'readFileSync').mockImplementation(((filePath: unknown) => {
       const fileName = String(filePath);
       return fileName.endsWith('doc1.md')
         ? '---\nname: doc1\ndescription: First doc\n---\nDoc 1 content'
         : '---\nname: doc2\ndescription: Second doc\n---\nDoc 2 content';
-    });
+    }) as unknown as typeof fileSystem.readFileSync);
 
     try {
       const results = loadMarkdownDirectory('any-dir');
@@ -46,10 +46,10 @@ describe('file-utility loadMarkdownDirectory: mocked scenarios', () => {
   test('skips unparseable markdown files with warning and returns remaining files', () => {
     const mockFiles = ['valid.md', 'bad.md'];
     const readdirSpy = spyOn(fileSystem, 'readdirSync').mockReturnValue(mockFiles as unknown as ReturnType<typeof fileSystem.readdirSync>);
-    const readFileSpy = spyOn(fileSystem, 'readFileSync').mockImplementation((filePath: unknown) => {
+    const readFileSpy = spyOn(fileSystem, 'readFileSync').mockImplementation(((filePath: unknown) => {
       const fileName = String(filePath);
       return fileName.endsWith('valid.md') ? '---\nname: valid\n---\nValid content' : '---\nname: [unclosed\n---\nBad content';
-    });
+    }) as unknown as typeof fileSystem.readFileSync);
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
     try {

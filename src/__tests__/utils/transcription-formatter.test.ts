@@ -1,41 +1,79 @@
 import { describe, expect, test } from 'bun:test';
-import { formatMsToTimestamp, formatWordLines, parseTimestampToMs, stripTranscriptionMetadata } from '../../utils/transcription-formatter.js';
 
-const MOCK_START_MS = 1000;
-const MOCK_END_MS = 2000;
-const EXPECTED_PARSED_MS = 83_456;
-const NEGATIVE_TEST_MS = -100;
+import {
+  extractMetadataAndBody,
+  formatMsToTimestamp,
+  formatTranscriptionWithMetadata,
+  formatWordLines,
+  parseTimestampToMs,
+  stripTranscriptionMetadata,
+} from '../../utils/transcription-formatter.js';
 
-describe('transcription-formatter timestamp utilities', () => {
-  test('parseTimestampToMs parses valid timestamps and returns zero for invalid format', () => {
-    expect(parseTimestampToMs('00:01:23.456')).toBe(EXPECTED_PARSED_MS);
-    expect(parseTimestampToMs('invalid-timestamp')).toBe(0);
-  });
+const VALID_BODY = '[00:00:00.000 --> 00:00:00.500] Hello\n[00:00:00.500 --> 00:00:01.000] world';
+const PARSED_MILLISECONDS = 83_456;
+const NEGATIVE_MILLISECONDS = -100;
+const WHITESPACE_REPEAT_COUNT = 3;
 
-  test('formatMsToTimestamp formats milliseconds to HH:MM:SS.mmm and clamps negative values', () => {
-    expect(formatMsToTimestamp(EXPECTED_PARSED_MS)).toBe('00:01:23.456');
-    expect(formatMsToTimestamp(NEGATIVE_TEST_MS)).toBe('00:00:00.000');
+describe('timestamp utilities', () => {
+  test('parseTimestampToMs and formatMsToTimestamp round-trip timestamps', () => {
+    expect(parseTimestampToMs('00:01:23.456')).toBe(PARSED_MILLISECONDS);
+    expect(formatMsToTimestamp(PARSED_MILLISECONDS)).toBe('00:01:23.456');
+    expect(parseTimestampToMs('invalid')).toBe(0);
+    expect(formatMsToTimestamp(NEGATIVE_MILLISECONDS)).toBe('00:00:00.000');
   });
 });
 
-describe('transcription-formatter word line formatting', () => {
-  test('formatWordLines extracts words with punctuation trimming and ignores brackets', () => {
-    const segments = [
+describe('formatWordLines', () => {
+  test('produces one timestamped word per line and strips punctuation', () => {
+    const lines = formatWordLines([
       {
-        start: '00:00:01.000',
-        end: '00:00:02.000',
-        startMs: MOCK_START_MS,
-        endMs: MOCK_END_MS,
+        startMs: 1000,
+        endMs: 2000,
         text: ' Hello, (world)! [whisper] ',
       },
-    ];
+    ]);
 
-    const lines = formatWordLines(segments);
     expect(lines).toEqual(['[00:00:01.037 --> 00:00:01.259] Hello', '[00:00:01.296 --> 00:00:01.593] world']);
   });
+});
 
-  test('stripTranscriptionMetadata handles content without metadata', () => {
-    const plainText = '[00:00:00.000 --> 00:00:01.000] Test';
-    expect(stripTranscriptionMetadata(plainText)).toBe(plainText);
+describe('metadata handling', () => {
+  test('extracts YAML frontmatter and raw transcribe headers', () => {
+    expect(extractMetadataAndBody(`---\nsource_file: sample.wav\nduration: 1s\n---\n\n${VALID_BODY}`)).toEqual({
+      sourceFile: 'sample.wav',
+      duration: '1s',
+      body: VALID_BODY,
+    });
+
+    expect(extractMetadataAndBody(`Filename: sample.mp4\nDuration: 00:01:05.000 (65.00s)\n\n${VALID_BODY}`)).toEqual({
+      sourceFile: 'sample.mp4',
+      duration: '00:01:05.000 (65.00s)',
+      body: VALID_BODY,
+    });
+  });
+
+  test('strips metadata blocks and leaves plain bodies untouched', () => {
+    const content = `---\nsource_file: sample.wav\nduration: 1s\n---\n\n${VALID_BODY}`;
+    expect(stripTranscriptionMetadata(content)).toBe(VALID_BODY);
+    expect(stripTranscriptionMetadata(VALID_BODY)).toBe(VALID_BODY);
+  });
+
+  test('formats a normalized transcription with metadata', () => {
+    const formatted = formatTranscriptionWithMetadata({
+      content: `Filename: sample.mp4\nFile type: video/mp4\nDuration: 00:01:05.000 (65.00s)\n\n${VALID_BODY}`,
+    });
+
+    expect(formatted).toBe(`---\nsource_file: sample.mp4\nduration: 00:01:05.000 (65.00s)\n---\n\n${VALID_BODY}`);
+  });
+
+  test('rejects missing metadata and invalid word rows', () => {
+    expect(() => formatTranscriptionWithMetadata({ content: VALID_BODY })).toThrow(/sourceFile/);
+    expect(() => formatTranscriptionWithMetadata({ content: VALID_BODY, sourceFile: 'sample.wav' })).toThrow(/duration/);
+    expect(() => formatTranscriptionWithMetadata({ content: 'plain prose', sourceFile: 'sample.wav', duration: '1s' })).toThrow(
+      /Invalid transcription body format/,
+    );
+    expect(() => formatTranscriptionWithMetadata({ content: ' '.repeat(WHITESPACE_REPEAT_COUNT), sourceFile: 'sample.wav', duration: '1s' })).toThrow(
+      /empty transcription body/,
+    );
   });
 });
