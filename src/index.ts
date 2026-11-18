@@ -7,7 +7,7 @@ import { configureAgents } from './configuration/agents-config.js';
 import { configureCommands } from './configuration/commands-config.js';
 import { configureSkills } from './configuration/skills-config.js';
 import { convert_audio } from './tools/convert-audio.js';
-import { download_whisper, download_whisper_cpp } from './tools/download-whisper-cpp.js';
+import { download_whisper_cpp } from './tools/download-whisper-cpp.js';
 import { save_transcription } from './tools/save-transcription.js';
 import { transcribe } from './tools/transcribe.js';
 import { HookEvent } from './types/hook-types.js';
@@ -23,7 +23,6 @@ const WhisperPlugin = (async (): Promise<Hooks> => {
       convert_audio,
       save_transcription,
       download_whisper_cpp,
-      download_whisper,
     },
     // Register whisper2opencode's skills, commands, and agents so OpenCode discovers
     // them without requiring manual config file edits.

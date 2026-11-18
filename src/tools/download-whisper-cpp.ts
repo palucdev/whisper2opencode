@@ -28,5 +28,3 @@ export const download_whisper_cpp = tool({
     return result.summary;
   },
 });
-
-export const download_whisper = download_whisper_cpp;

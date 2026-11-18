@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { download_whisper, download_whisper_cpp } from '../../tools/download-whisper-cpp.js';
+import { download_whisper_cpp } from '../../tools/download-whisper-cpp.js';
 import type { DownloadWhisperOptions } from '../../types/whisper-types.js';
 import * as downloadWhisperModule from '../../utils/download-whisper.js';
 import { createTestContext } from '../fixtures.js';
@@ -31,8 +31,7 @@ afterEach(() => {
 });
 
 describe('download_whisper_cpp tool', () => {
-  test('exposes setup arguments and keeps the download_whisper alias', () => {
-    expect(download_whisper).toBe(download_whisper_cpp);
+  test('exposes setup arguments', () => {
     expect(download_whisper_cpp.args.packageManager).toBeDefined();
     expect(download_whisper_cpp.args.modelName).toBeDefined();
     expect(download_whisper_cpp.args.skipModel).toBeDefined();
@@ -67,7 +66,7 @@ describe('download_whisper_cpp tool', () => {
     const setupSpy = mockSetup((options) => (capturedOptions = options));
 
     try {
-      await download_whisper.execute({}, createTestContext(TEST_ROOT));
+      await download_whisper_cpp.execute({}, createTestContext(TEST_ROOT));
       expect(capturedOptions?.directory).toBe(TEST_ROOT);
     } finally {
       setupSpy.mockRestore();

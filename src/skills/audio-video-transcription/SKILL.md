@@ -116,7 +116,7 @@ If follow-up questions arise about a media file that was already transcribed in 
 
 ## Error Handling
 
-- **Missing whisper.cpp or Speech Model**: If transcription fails because `whisper.cpp` is missing or the model cannot be downloaded, use the `download_whisper_cpp` tool (or `download_whisper`) to automatically install `whisper.cpp` for the detected package manager (Bun/npm/pnpm/yarn) and cache the required GGML model.
+- **Missing whisper.cpp or Speech Model**: If transcription fails because `whisper.cpp` is missing or the model cannot be downloaded, use the `download_whisper_cpp` tool to automatically install `whisper.cpp` for the detected package manager (Bun/npm/pnpm/yarn) and cache the required GGML model.
 - **Missing or Empty File**: If the subagent reports that the file does not exist or is empty, use `glob` to locate the correct media file path in the workspace or ask the user to verify the path.
 - **Video Without Audio Stream**: If the subagent reports that a video container has no audio track (silent screen recording), inform the user that no spoken audio stream exists in the container.
 - **Output File Already Exists**: `save_transcription` refuses to overwrite existing `.txt` files. If saving fails because the target `.txt` file already exists, instruct the subagent (or ask the user) to use a new non-conflicting `.txt` filename.
