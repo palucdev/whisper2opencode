@@ -22,9 +22,10 @@ export const hasValidCachedModel = async (modelPath: string): Promise<boolean> =
   }
 };
 
-export const persistModelToCache = async (modelPath: string, buffer: Uint8Array): Promise<void> => {
-  await Bun.write(modelPath, buffer);
-  await Bun.write(`${modelPath}${MODEL_SIZE_SIDECAR_SUFFIX}`, String(buffer.byteLength));
+export const persistModelToCache = async (modelPath: string, response: Response): Promise<void> => {
+  await Bun.write(modelPath, response);
+  const stat = await Bun.file(modelPath).stat();
+  await Bun.write(`${modelPath}${MODEL_SIZE_SIDECAR_SUFFIX}`, String(stat.size));
 };
 
 const resolveCustomModelPath = async (configured: string, baseDirectory: string): Promise<string> => {
@@ -75,8 +76,7 @@ const downloadDefaultModel = async (cachedModelPath: string): Promise<string> =>
     );
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await persistModelToCache(cachedModelPath, buffer);
+  await persistModelToCache(cachedModelPath, response);
   return cachedModelPath;
 };
 

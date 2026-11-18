@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { accessSync, rmSync } from 'node:fs';
+import { accessSync, mkdirSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ConvertAudioOptions, ResolveMediaOptions, SupportedConvertFormat } from '../types/whisper-types.js';
@@ -74,13 +74,17 @@ function isSamePath(path1: string, path2: string): boolean {
   return process.platform === 'win32' ? normalizedPath1.toLowerCase() === normalizedPath2.toLowerCase() : normalizedPath1 === normalizedPath2;
 }
 
+const pcmBytesToFloat32 = (pcmBuffer: Buffer): Float32Array => {
+  const sampleCount = Math.floor(pcmBuffer.byteLength / FLOAT32_BYTES_PER_SAMPLE);
+  const isAligned = pcmBuffer.byteOffset % FLOAT32_BYTES_PER_SAMPLE === 0;
+  return isAligned
+    ? new Float32Array(pcmBuffer.buffer, pcmBuffer.byteOffset, sampleCount)
+    : new Float32Array(pcmBuffer.buffer.slice(pcmBuffer.byteOffset, pcmBuffer.byteOffset + sampleCount * FLOAT32_BYTES_PER_SAMPLE));
+};
+
 const decodePcmf32File = async (mediaPath: string): Promise<Float32Array> => {
   const raw = Buffer.from(await Bun.file(mediaPath).arrayBuffer());
-  const sampleCount = Math.floor(raw.byteLength / FLOAT32_BYTES_PER_SAMPLE);
-  const isAligned = raw.byteOffset % FLOAT32_BYTES_PER_SAMPLE === 0;
-  const samples = isAligned
-    ? new Float32Array(raw.buffer, raw.byteOffset, sampleCount)
-    : new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + sampleCount * FLOAT32_BYTES_PER_SAMPLE));
+  const samples = pcmBytesToFloat32(raw);
   if (samples.length === 0) {
     throw new Error(
       `Decoded audio from "${mediaPath}" contains 0 samples. Hint: The .pcmf32 file is empty or smaller than 4 bytes. Regenerate the file as 16kHz mono 32-bit float PCM or pass the original audio/video file.`,
@@ -90,11 +94,7 @@ const decodePcmf32File = async (mediaPath: string): Promise<Float32Array> => {
 };
 
 const bufferToFloat32Array = (pcmBuffer: Buffer, mediaPath: string): Float32Array => {
-  const sampleCount = Math.floor(pcmBuffer.byteLength / FLOAT32_BYTES_PER_SAMPLE);
-  const isAligned = pcmBuffer.byteOffset % FLOAT32_BYTES_PER_SAMPLE === 0;
-  const samples = isAligned
-    ? new Float32Array(pcmBuffer.buffer, pcmBuffer.byteOffset, sampleCount)
-    : new Float32Array(pcmBuffer.buffer.slice(pcmBuffer.byteOffset, pcmBuffer.byteOffset + sampleCount * FLOAT32_BYTES_PER_SAMPLE));
+  const samples = pcmBytesToFloat32(pcmBuffer);
   if (samples.length === 0) {
     throw new Error(
       `Decoded audio from "${mediaPath}" contains 0 samples. Hint: The audio stream is empty or has zero duration. Check the source file or convert it to a valid 16kHz mono .wav file.`,
@@ -131,6 +131,15 @@ const canAccess = (targetPath: string): boolean => {
   }
 };
 
+const validateOutputWithinDirectory = (resolvedOutputPath: string, baseDirectory: string): void => {
+  const relativeToBase = path.relative(baseDirectory, resolvedOutputPath);
+  if (!relativeToBase || relativeToBase.startsWith('..') || path.isAbsolute(relativeToBase)) {
+    throw new Error(
+      `Output path "${resolvedOutputPath}" is outside the working directory "${baseDirectory}". Hint: Provide an 'outputPath' inside the current working directory without '..' traversal.`,
+    );
+  }
+};
+
 const validateOutputCollision = (resolvedOutputPath: string, options: { resolvedInputPath: string; isOverwrite: boolean }): void => {
   if (isSamePath(resolvedOutputPath, options.resolvedInputPath)) {
     throw new Error(
@@ -142,20 +151,8 @@ const validateOutputCollision = (resolvedOutputPath: string, options: { resolved
   }
 };
 
-const CONVERT_MARKER_FILE_NAME = '.w2oc-convert-marker';
-
-const prepareOutputDirectory = async (resolvedOutputPath: string): Promise<string | undefined> => {
-  const parentDirectory = path.dirname(resolvedOutputPath);
-  if (canAccess(parentDirectory)) {
-    return undefined;
-  }
-  const markerPath = path.join(parentDirectory, CONVERT_MARKER_FILE_NAME);
-  await Bun.write(markerPath, '');
-  return markerPath;
-};
-
 export async function convertAudioFile(options: ConvertAudioOptions): Promise<string> {
-  const baseDirectory = options.directory ?? process.cwd();
+  const baseDirectory = path.resolve(options.directory ?? process.cwd());
   const { resolvedPath: resolvedInputPath } = await resolveMediaFile({
     inputPath: options.inputPath,
     baseDirectory,
@@ -165,9 +162,10 @@ export async function convertAudioFile(options: ConvertAudioOptions): Promise<st
   const isOverwrite = options.isOverwrite ?? options.overwrite ?? true;
   const resolvedOutputPath = resolveDestinationPath(options, { resolvedInputPath, baseDirectory });
 
+  validateOutputWithinDirectory(resolvedOutputPath, baseDirectory);
   validateOutputCollision(resolvedOutputPath, { resolvedInputPath, isOverwrite });
 
-  const markerPath = await prepareOutputDirectory(resolvedOutputPath);
+  mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
 
   const ffmpegPath = getFfmpegBinary();
   const commandArguments = buildConvertArguments(options, { resolvedInputPath, resolvedOutputPath });
@@ -176,10 +174,6 @@ export async function convertAudioFile(options: ConvertAudioOptions): Promise<st
     execFileSync(ffmpegPath, commandArguments, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
     handleConvertError(error, { resolvedInputPath, targetFormat });
-  } finally {
-    if (markerPath) {
-      rmSync(markerPath, { force: true });
-    }
   }
 
   return resolvedOutputPath;

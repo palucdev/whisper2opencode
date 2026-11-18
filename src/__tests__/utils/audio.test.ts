@@ -76,13 +76,16 @@ describe('convertAudioFile', () => {
     expect(fs.existsSync(outputPath)).toBe(true);
   });
 
-  test('guards against overwriting outputs and input collisions', async () => {
+  test('guards against overwriting outputs, input collisions, and paths outside the working directory', async () => {
     const existingOutput = path.join(TEST_ROOT, 'existing.wav');
     fs.writeFileSync(existingOutput, '');
     await expect(convertAudioFile({ inputPath: MOCK_AUDIO_PATH, outputPath: existingOutput, format: 'wav', overwrite: false })).rejects.toThrow(
       /already exists/,
     );
     await expect(convertAudioFile({ inputPath: MOCK_AUDIO_PATH, outputPath: MOCK_AUDIO_PATH, format: 'wav' })).rejects.toThrow(/same as input/);
+    await expect(
+      convertAudioFile({ inputPath: MOCK_AUDIO_PATH, outputPath: '../outside.wav', format: 'wav', directory: TEST_ROOT }),
+    ).rejects.toThrow(/outside the working directory/);
   });
 
   test('derives a non-colliding output name when the target matches the input', async () => {

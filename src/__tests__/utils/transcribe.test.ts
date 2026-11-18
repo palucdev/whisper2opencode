@@ -7,11 +7,12 @@ import '../mock-whisper.js';
 import { mockWhisperState } from '../mock-whisper.js';
 
 import type { WhisperFactory } from '../../types/whisper-types.js';
-import { loadWhisperFactory, transcribeAudioFile } from '../../utils/transcribe.js';
+import { MAX_TRANSCRIPTION_CACHE_SIZE, clearTranscriptionCache, loadWhisperFactory, transcribeAudioFile } from '../../utils/transcribe.js';
 import { MOCK_AUDIO_PATH, MOCK_MODEL_PATH, MOCK_VIDEO_PATH } from '../fixtures.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'transcribe');
 const LOCAL_PACKAGE_ROOT = path.join(TEST_ROOT, 'local-package');
+const CALLS_BEFORE_AND_AFTER_EVICTION = 2;
 
 const customFactory: WhisperFactory = () =>
   Promise.resolve({
@@ -22,6 +23,7 @@ const customFactory: WhisperFactory = () =>
   });
 
 beforeEach(() => {
+  clearTranscriptionCache();
   mockWhisperState.reset();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true });
   fs.mkdirSync(TEST_ROOT, { recursive: true });
@@ -77,13 +79,6 @@ describe('transcribeAudioFile', () => {
     expect(output).toContain('fellow');
   });
 
-  test('caches results for unchanged files', async () => {
-    const firstResult = await transcribeAudioFile({ filePath: MOCK_AUDIO_PATH, language: 'en', modelPath: MOCK_MODEL_PATH });
-    const secondResult = await transcribeAudioFile({ filePath: MOCK_AUDIO_PATH, language: 'en', modelPath: MOCK_MODEL_PATH });
-
-    expect(secondResult).toBe(firstResult);
-  });
-
   test('reports model initialization and execution failures', async () => {
     const failInitAudio = path.join(TEST_ROOT, 'fail-init.wav');
     fs.copyFileSync(MOCK_AUDIO_PATH, failInitAudio);
@@ -104,5 +99,48 @@ describe('transcribeAudioFile', () => {
     } finally {
       mockWhisperState.failFullDefault = false;
     }
+  });
+});
+
+describe('transcribeAudioFile caching', () => {
+  test('caches results for unchanged files and evicts oldest entries past capacity', async () => {
+    let factoryCalls = 0;
+    const countingFactory: WhisperFactory = () => {
+      factoryCalls += 1;
+      return customFactory();
+    };
+
+    const firstResult = await transcribeAudioFile({
+      filePath: MOCK_AUDIO_PATH,
+      language: 'en',
+      modelPath: MOCK_MODEL_PATH,
+      whisperFactory: countingFactory,
+    });
+    const secondResult = await transcribeAudioFile({
+      filePath: MOCK_AUDIO_PATH,
+      language: 'en',
+      modelPath: MOCK_MODEL_PATH,
+      whisperFactory: countingFactory,
+    });
+
+    expect(secondResult).toBe(firstResult);
+    expect(factoryCalls).toBe(1);
+
+    for (let index = 0; index < MAX_TRANSCRIPTION_CACHE_SIZE; index++) {
+      await transcribeAudioFile({
+        filePath: MOCK_AUDIO_PATH,
+        language: `lang-${index}`,
+        modelPath: MOCK_MODEL_PATH,
+        whisperFactory: countingFactory,
+      });
+    }
+
+    await transcribeAudioFile({
+      filePath: MOCK_AUDIO_PATH,
+      language: 'en',
+      modelPath: MOCK_MODEL_PATH,
+      whisperFactory: countingFactory,
+    });
+    expect(factoryCalls).toBe(MAX_TRANSCRIPTION_CACHE_SIZE + CALLS_BEFORE_AND_AFTER_EVICTION);
   });
 });

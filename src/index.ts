@@ -13,6 +13,7 @@ import { transcribe } from './tools/transcribe.js';
 import { HookEvent } from './types/hook-types.js';
 import type { OpenCodeConfig } from './types/opencode-types.js';
 import { PLUGIN_VERSION } from './utils/plugin-info.js';
+import { clearTranscriptionCache } from './utils/transcribe.js';
 
 // Only the plugin factory method should be exported from this file due to OpenCode plugin handling
 
@@ -37,7 +38,7 @@ const WhisperPlugin = (async (): Promise<Hooks> => {
       console.log(`[whisper2opencode] Plugin installation completed successfully (v${PLUGIN_VERSION}).`);
     },
     dispose: async () => {
-      // Cleanup hooks when plugin instance is disposed
+      clearTranscriptionCache();
     },
   };
 

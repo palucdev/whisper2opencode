@@ -20,13 +20,7 @@ const EXPECTED_EXTRACTED_FILE = path.join(EXPECTED_PACKAGE_PATH, 'whisper.js');
 const CACHED_TINY_MODEL_PATH = path.join(TEST_HOME, '.cache', 'whisper2opencode', 'ggml-tiny.en.bin');
 const CACHED_TINY_MODEL_SIDECAR_PATH = `${CACHED_TINY_MODEL_PATH}.size`;
 
-const fetchModel = () =>
-  Promise.resolve({
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    arrayBuffer: () => Promise.resolve(Buffer.from('mock-model')),
-  } as unknown as Response);
+const fetchModel = () => Promise.resolve(new Response('mock-model', { status: 200, statusText: 'OK' }));
 
 const fetchTarball = () => {
   const archive = createMinimalTarGz('module.exports = {};');
@@ -52,7 +46,9 @@ describe('resolveModelFileName', () => {
   test('normalizes defaults, aliases, and raw filenames', () => {
     expect(resolveModelFileName()).toBe('ggml-base.en.bin');
     expect(resolveModelFileName('tiny.en')).toBe('ggml-tiny.en.bin');
+    expect(resolveModelFileName('ggml-base.en')).toBe('ggml-base.en.bin');
     expect(resolveModelFileName('large')).toBe('ggml-large-v3.bin');
+    expect(resolveModelFileName('ggml-large')).toBe('ggml-large-v3.bin');
     expect(resolveModelFileName('custom.bin')).toBe('ggml-custom.bin');
   });
 

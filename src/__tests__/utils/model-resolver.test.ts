@@ -21,13 +21,7 @@ const setModelPath = (value?: string): void => {
   }
 };
 
-const fetchModel = () =>
-  Promise.resolve({
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    arrayBuffer: () => Promise.resolve(Buffer.from('mock-model')),
-  } as unknown as Response);
+const fetchModel = () => Promise.resolve(new Response('mock-model', { status: 200, statusText: 'OK' }));
 
 beforeEach(() => {
   setModelPath();

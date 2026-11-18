@@ -10,6 +10,7 @@ import { download_whisper_cpp } from '../tools/download-whisper-cpp.js';
 import { save_transcription } from '../tools/save-transcription.js';
 import { transcribe } from '../tools/transcribe.js';
 import type { OpenCodeConfig } from '../types/opencode-types.js';
+import * as transcribeModule from '../utils/transcribe.js';
 
 describe('WhisperPlugin', () => {
   test('registers tools and lifecycle hooks', async () => {
@@ -47,8 +48,14 @@ describe('WhisperPlugin', () => {
     }
   });
 
-  test('disposes cleanly', async () => {
-    const plugin = await WhisperPlugin();
-    await expect(plugin.dispose?.()).resolves.toBeUndefined();
+  test('disposes cleanly and clears transcription cache', async () => {
+    const clearCacheSpy = spyOn(transcribeModule, 'clearTranscriptionCache');
+    try {
+      const plugin = await WhisperPlugin();
+      await expect(plugin.dispose?.()).resolves.toBeUndefined();
+      expect(clearCacheSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      clearCacheSpy.mockRestore();
+    }
   });
 });

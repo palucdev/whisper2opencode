@@ -29,7 +29,7 @@ const resolveFfmpegCandidate = (overridePath: unknown, moduleLoader: (identifier
     return overridePath;
   }
   const environmentPath = getEnvironmentConfig().ffmpegPath;
-  if (environmentPath !== undefined) {
+  if (environmentPath?.trim()) {
     return environmentPath;
   }
   try {

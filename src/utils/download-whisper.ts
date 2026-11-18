@@ -17,7 +17,7 @@ export const HUGGINGFACE_MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whis
 
 const MODEL_ALIASES = new Map<string, string>([['large', 'ggml-large-v3.bin']]);
 
-const MODEL_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*\.bin$/;
+const MODEL_FILE_NAME_PATTERN = /^ggml-[a-z0-9][a-z0-9._-]*\.bin$/;
 
 const doesPathExist = (targetPath: string): boolean => {
   try {
@@ -32,8 +32,8 @@ const doesPathExist = (targetPath: string): boolean => {
 export function resolveModelFileName(name?: string): string {
   const trimmed = name?.trim().toLowerCase();
   if (!trimmed) return 'ggml-base.en.bin';
-  const withGgmlPrefix = trimmed.startsWith('ggml-') ? trimmed : `ggml-${trimmed}`;
-  const resolved = trimmed.endsWith('.bin') ? withGgmlPrefix : (MODEL_ALIASES.get(trimmed) ?? `ggml-${trimmed}.bin`);
+  const bare = trimmed.replace(/^ggml-/, '').replace(/\.bin$/, '');
+  const resolved = MODEL_ALIASES.get(bare) ?? `ggml-${bare}.bin`;
   if (!MODEL_FILE_NAME_PATTERN.test(resolved)) {
     throw new Error(
       `Invalid model name "${name}". Hint: Use a simple model name such as 'tiny.en', 'base.en', or 'small'; path separators and traversal sequences are not allowed.`,
@@ -199,8 +199,7 @@ export async function downloadGgmlModel(
     );
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await persistModelToCache(cachedModelPath, buffer);
+  await persistModelToCache(cachedModelPath, response);
 
   return { modelPath: cachedModelPath, status: 'downloaded' };
 }

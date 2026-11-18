@@ -27,7 +27,35 @@ const MILLISECONDS_PER_SECOND = 1000;
 const DURATION_DECIMAL_PLACES = 2;
 const TAIL_ERROR_LINES_COUNT = 3;
 
+export const MAX_TRANSCRIPTION_CACHE_SIZE = 50;
+
 const transcriptionCache = new Map<string, TranscriptionMediaResult>();
+
+export function clearTranscriptionCache(): void {
+  transcriptionCache.clear();
+}
+
+const getCachedTranscription = (cacheKey: string): TranscriptionMediaResult | undefined => {
+  const cached = transcriptionCache.get(cacheKey);
+  if (!cached) {
+    return undefined;
+  }
+  transcriptionCache.delete(cacheKey);
+  transcriptionCache.set(cacheKey, cached);
+  return cached;
+};
+
+const setCachedTranscription = (cacheKey: string, result: TranscriptionMediaResult): void => {
+  if (transcriptionCache.has(cacheKey)) {
+    transcriptionCache.delete(cacheKey);
+  } else if (transcriptionCache.size >= MAX_TRANSCRIPTION_CACHE_SIZE) {
+    const oldestKey = transcriptionCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      transcriptionCache.delete(oldestKey);
+    }
+  }
+  transcriptionCache.set(cacheKey, result);
+};
 
 const loadFactoryFromTarget = (targetDirectory?: string): WhisperFactory | undefined => {
   if (!targetDirectory) {
@@ -179,7 +207,7 @@ export async function transcribeAudioFile(options: TranscribeOptions): Promise<s
   const language = options.language?.trim() || 'en';
   const cacheKey = `${resolvedInputPath}:${stat.mtimeMs}:${stat.size}:${language}:${resolvedModelPath}`;
 
-  let result = transcriptionCache.get(cacheKey);
+  let result = getCachedTranscription(cacheKey);
   if (!result) {
     const modelData = Buffer.from(await Bun.file(resolvedModelPath).arrayBuffer());
     const pcm = await decodeAudioToFloat32(resolvedInputPath);
@@ -195,7 +223,7 @@ export async function transcribeAudioFile(options: TranscribeOptions): Promise<s
     });
 
     result = { segments, durationMs };
-    transcriptionCache.set(cacheKey, result);
+    setCachedTranscription(cacheKey, result);
   }
 
   const clampedDurationMs = Math.max(0, Math.round(result.durationMs));
