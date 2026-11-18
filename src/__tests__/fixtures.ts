@@ -150,8 +150,14 @@ function computeHeaderChecksum(tarHeader: Buffer): number {
   return checksum;
 }
 
-function writeTarHeaderFields(tarHeader: Buffer, contentBuffer: Buffer): void {
-  tarHeader.write('package/whisper.js', 0, TAR_NAME_LIMIT, 'utf8');
+interface TarHeaderContent {
+  contentBuffer: Buffer;
+  memberName: string;
+}
+
+function writeTarHeaderFields(tarHeader: Buffer, headerContent: TarHeaderContent): void {
+  const { contentBuffer, memberName } = headerContent;
+  tarHeader.write(memberName, 0, TAR_NAME_LIMIT, 'utf8');
   tarHeader.write('0000644\0', TAR_MODE_OFFSET, TAR_FIELD_OCTAL_8, 'utf8');
   tarHeader.write('0000000\0', TAR_UID_OFFSET, TAR_FIELD_OCTAL_8, 'utf8');
   tarHeader.write('0000000\0', TAR_GID_OFFSET, TAR_FIELD_OCTAL_8, 'utf8');
@@ -169,10 +175,10 @@ function writeTarHeaderFields(tarHeader: Buffer, contentBuffer: Buffer): void {
   tarHeader.write(checksumOctal, TAR_CHKSUM_OFFSET, TAR_FIELD_OCTAL_8, 'utf8');
 }
 
-export function createMinimalTarGz(content: string): Buffer {
+export function createMinimalTarGz(content: string, memberName = 'package/whisper.js'): Buffer {
   const tarHeader = Buffer.alloc(TAR_BLOCK_BYTES);
   const contentBuffer = Buffer.from(content, 'utf8');
-  writeTarHeaderFields(tarHeader, contentBuffer);
+  writeTarHeaderFields(tarHeader, { contentBuffer, memberName });
 
   const padSize = Math.ceil(contentBuffer.length / TAR_BLOCK_BYTES) * TAR_BLOCK_BYTES - contentBuffer.length;
   const padding = Buffer.alloc(padSize);

@@ -18,8 +18,8 @@ afterEach(() => {
 });
 
 describe('saveTranscriptionFile', () => {
-  test('writes a .txt file with a metadata header and appends the extension', () => {
-    const savedPath = saveTranscriptionFile({
+  test('writes a .txt file into a nested path with a metadata header and appends the extension', async () => {
+    const savedPath = await saveTranscriptionFile({
       filePath: 'transcripts/notes',
       sourceFile: 'jfk.wav',
       duration: DURATION,
@@ -27,22 +27,25 @@ describe('saveTranscriptionFile', () => {
       directory: TEST_ROOT,
     });
 
-    expect(savedPath).toBe(path.join(TEST_ROOT, 'transcripts', 'notes.txt'));
-    expect(fs.readFileSync(savedPath, 'utf8')).toBe(`---\nsource_file: jfk.wav\nduration: ${DURATION}\n---\n\n${BODY}`);
+    const expectedPath = path.join(TEST_ROOT, 'transcripts', 'notes.txt');
+    expect(savedPath).toBe(expectedPath);
+    expect(fs.readFileSync(expectedPath, 'utf8')).toBe(`---\nsource_file: jfk.wav\nduration: ${DURATION}\n---\n\n${BODY}`);
   });
 
-  test('rejects overwriting existing files and non-txt extensions', () => {
+  test('rejects overwriting existing files and non-txt extensions', async () => {
     fs.writeFileSync(path.join(TEST_ROOT, 'existing.txt'), 'existing');
-    expect(() =>
+    await expect(
       saveTranscriptionFile({ filePath: 'existing.txt', sourceFile: 'jfk.wav', duration: DURATION, content: BODY, directory: TEST_ROOT }),
-    ).toThrow(/already exists/);
-    expect(() => saveTranscriptionFile({ filePath: 'notes.js', content: BODY, directory: TEST_ROOT })).toThrow(/Only "\.txt"/);
+    ).rejects.toThrow(/already exists/);
+    await expect(saveTranscriptionFile({ filePath: 'notes.js', content: BODY, directory: TEST_ROOT })).rejects.toThrow(/Only "\.txt"/);
   });
 
-  test('rejects paths outside the working directory, hidden paths, and empty input', () => {
-    expect(() => saveTranscriptionFile({ filePath: '../outside.txt', content: BODY, directory: TEST_ROOT })).toThrow(/outside the working directory/);
-    expect(() => saveTranscriptionFile({ filePath: '.env', content: BODY, directory: TEST_ROOT })).toThrow(/hidden files/);
-    expect(() => saveTranscriptionFile({ filePath: '  ', content: BODY, directory: TEST_ROOT })).toThrow(/Missing required 'filePath'/);
-    expect(() => saveTranscriptionFile({ filePath: 'notes.txt', content: '  ', directory: TEST_ROOT })).toThrow(/Missing or empty 'content'/);
+  test('rejects paths outside the working directory, hidden paths, and empty input', async () => {
+    await expect(saveTranscriptionFile({ filePath: '../outside.txt', content: BODY, directory: TEST_ROOT })).rejects.toThrow(
+      /outside the working directory/,
+    );
+    await expect(saveTranscriptionFile({ filePath: '.env', content: BODY, directory: TEST_ROOT })).rejects.toThrow(/hidden files/);
+    await expect(saveTranscriptionFile({ filePath: '  ', content: BODY, directory: TEST_ROOT })).rejects.toThrow(/Missing required 'filePath'/);
+    await expect(saveTranscriptionFile({ filePath: 'notes.txt', content: '  ', directory: TEST_ROOT })).rejects.toThrow(/Missing or empty 'content'/);
   });
 });

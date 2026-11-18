@@ -25,23 +25,33 @@ afterEach(() => {
 });
 
 describe('unpackTarballBuffer', () => {
-  test('extracts package members into the target directory', () => {
+  test('extracts package members into the target directory', async () => {
     const tarBuffer = zlib.gunzipSync(createMinimalTarGz('console.log("whisper");'));
     const targetDirectory = path.join(TEST_ROOT, 'unpacked');
 
-    unpackTarballBuffer(tarBuffer, targetDirectory);
+    await unpackTarballBuffer(tarBuffer, targetDirectory);
 
     const extractedFile = path.join(targetDirectory, 'whisper.js');
     expect(fs.readFileSync(extractedFile, 'utf8')).toBe('console.log("whisper");');
   });
 
-  test('rejects members that escape the target directory', () => {
+  test('creates parent directories for nested members', async () => {
+    const tarBuffer = zlib.gunzipSync(createMinimalTarGz('nested-content', 'package/lib/deep/module.js'));
+    const targetDirectory = path.join(TEST_ROOT, 'nested-unpacked');
+
+    await unpackTarballBuffer(tarBuffer, targetDirectory);
+
+    const extractedFile = path.join(targetDirectory, 'lib', 'deep', 'module.js');
+    expect(fs.readFileSync(extractedFile, 'utf8')).toBe('nested-content');
+  });
+
+  test('rejects members that escape the target directory', async () => {
     const tarBuffer = Buffer.alloc(TAR_BLOCK_SIZE);
     tarBuffer.write('../outside.js', 0, TAR_FILENAME_LIMIT, 'utf8');
     tarBuffer.write('00000000000\0', TAR_SIZE_OFFSET, TAR_SIZE_LENGTH, 'utf8');
     tarBuffer.write('0', TAR_TYPE_OFFSET, 1, 'utf8');
 
-    expect(() => unpackTarballBuffer(tarBuffer, path.join(TEST_ROOT, 'safe'))).toThrow(/escapes the extraction directory/);
+    await expect(unpackTarballBuffer(tarBuffer, path.join(TEST_ROOT, 'safe'))).rejects.toThrow(/escapes the extraction directory/);
     expect(fs.existsSync(path.join(TEST_ROOT, 'outside.js'))).toBe(false);
   });
 });

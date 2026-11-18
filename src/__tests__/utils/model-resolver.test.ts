@@ -3,12 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { DEFAULT_MODEL_NAME, resolveModelPath } from '../../utils/model-resolver.js';
+import { resolveModelPath } from '../../utils/model-resolver.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'model-resolver');
 const TEST_HOME = path.join(TEST_ROOT, 'home');
 const CACHE_DIRECTORY = path.join(TEST_HOME, '.cache', 'whisper2opencode');
-const CACHED_MODEL_PATH = path.join(CACHE_DIRECTORY, DEFAULT_MODEL_NAME);
+const CACHED_MODEL_PATH = path.join(CACHE_DIRECTORY, 'ggml-base.en.bin');
+const CACHED_MODEL_SIDECAR_PATH = `${CACHED_MODEL_PATH}.size`;
 const environmentSource = Reflect.get(process, 'env') as Record<string, string | undefined>;
 const originalModelPath = environmentSource.WHISPER_MODEL_PATH;
 
@@ -69,10 +70,46 @@ describe('resolveModelPath default model', () => {
     try {
       fs.mkdirSync(CACHE_DIRECTORY, { recursive: true });
       fs.writeFileSync(CACHED_MODEL_PATH, 'cached-model');
+      fs.writeFileSync(CACHED_MODEL_SIDECAR_PATH, String(Buffer.byteLength('cached-model')));
 
       expect(await resolveModelPath(undefined, TEST_ROOT)).toBe(CACHED_MODEL_PATH);
     } finally {
       homedirSpy.mockRestore();
+    }
+  });
+
+  test('re-downloads a cached model without a size sidecar', async () => {
+    const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchModel as unknown as typeof fetch);
+    try {
+      fs.mkdirSync(CACHE_DIRECTORY, { recursive: true });
+      fs.writeFileSync(CACHED_MODEL_PATH, 'stale-model');
+
+      expect(await resolveModelPath(undefined, TEST_ROOT)).toBe(CACHED_MODEL_PATH);
+      expect(fs.readFileSync(CACHED_MODEL_PATH, 'utf8')).toBe('mock-model');
+      expect(fs.readFileSync(CACHED_MODEL_SIDECAR_PATH, 'utf8')).toBe(String(Buffer.byteLength('mock-model')));
+    } finally {
+      homedirSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
+describe('resolveModelPath default model download', () => {
+  test('re-downloads a cached model with a mismatched sidecar size', async () => {
+    const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchModel as unknown as typeof fetch);
+    try {
+      fs.mkdirSync(CACHE_DIRECTORY, { recursive: true });
+      fs.writeFileSync(CACHED_MODEL_PATH, 'stale-model');
+      fs.writeFileSync(CACHED_MODEL_SIDECAR_PATH, '1');
+
+      expect(await resolveModelPath(undefined, TEST_ROOT)).toBe(CACHED_MODEL_PATH);
+      expect(fs.readFileSync(CACHED_MODEL_PATH, 'utf8')).toBe('mock-model');
+      expect(fs.readFileSync(CACHED_MODEL_SIDECAR_PATH, 'utf8')).toBe(String(Buffer.byteLength('mock-model')));
+    } finally {
+      homedirSpy.mockRestore();
+      fetchSpy.mockRestore();
     }
   });
 
@@ -82,12 +119,15 @@ describe('resolveModelPath default model', () => {
     try {
       expect(await resolveModelPath(undefined, TEST_ROOT)).toBe(CACHED_MODEL_PATH);
       expect(fs.existsSync(CACHED_MODEL_PATH)).toBe(true);
+      expect(fs.readFileSync(CACHED_MODEL_SIDECAR_PATH, 'utf8')).toBe(String(Buffer.byteLength('mock-model')));
     } finally {
       homedirSpy.mockRestore();
       fetchSpy.mockRestore();
     }
   });
+});
 
+describe('resolveModelPath default model errors', () => {
   test('surfaces network and HTTP errors', async () => {
     const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
     try {

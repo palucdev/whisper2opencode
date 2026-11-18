@@ -29,7 +29,8 @@ describe('save_transcription tool', () => {
       createTestContext(TEST_ROOT),
     )) as string;
 
-    expect(savedPath).toBe(path.join(TEST_ROOT, 'notes.txt'));
-    expect(fs.readFileSync(savedPath, 'utf8')).toBe('---\nsource_file: jfk.wav\nduration: 00:00:01.000 (1.00s)\n---\n\n' + BODY);
+    const expectedPath = path.join(TEST_ROOT, 'notes.txt');
+    expect(savedPath).toBe(expectedPath);
+    expect(fs.readFileSync(expectedPath, 'utf8')).toBe('---\nsource_file: jfk.wav\nduration: 00:00:01.000 (1.00s)\n---\n\n' + BODY);
   });
 });

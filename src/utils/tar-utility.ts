@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 
 export const TAR_BLOCK_SIZE = 512;
@@ -26,7 +25,7 @@ const resolveMemberDestination = (targetDirectory: string, memberName: string): 
   return memberPath;
 };
 
-export function unpackTarballBuffer(tarBuffer: Buffer, targetDirectory: string): void {
+export async function unpackTarballBuffer(tarBuffer: Buffer, targetDirectory: string): Promise<void> {
   let offset = 0;
   while (offset + TAR_BLOCK_SIZE <= tarBuffer.length) {
     const header = tarBuffer.subarray(offset, offset + TAR_BLOCK_SIZE);
@@ -45,8 +44,7 @@ export function unpackTarballBuffer(tarBuffer: Buffer, targetDirectory: string):
     if (rawName && (typeFlag === '0' || typeFlag === '\0')) {
       const relativePath = rawName.replace(/^package\//, '');
       const outFilePath = resolveMemberDestination(targetDirectory, relativePath);
-      fs.mkdirSync(path.dirname(outFilePath), { recursive: true });
-      fs.writeFileSync(outFilePath, tarBuffer.subarray(offset, offset + size));
+      await Bun.write(outFilePath, tarBuffer.subarray(offset, offset + size));
     }
 
     const blockCount = Math.ceil(size / TAR_BLOCK_SIZE);

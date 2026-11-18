@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type {
@@ -175,15 +174,15 @@ const runWhisperInference = async (parameters: WhisperInferenceParameters): Prom
 
 export async function transcribeAudioFile(options: TranscribeOptions): Promise<string> {
   const baseDirectory = options.directory ?? process.cwd();
-  const { resolvedPath: resolvedInputPath, stat } = resolveMediaFile(options.filePath, baseDirectory, 'filePath');
+  const { resolvedPath: resolvedInputPath, stat } = await resolveMediaFile(options.filePath, baseDirectory, 'filePath');
   const resolvedModelPath = await resolveModelPath(options.modelPath, baseDirectory);
   const language = options.language?.trim() || 'en';
   const cacheKey = `${resolvedInputPath}:${stat.mtimeMs}:${stat.size}:${language}:${resolvedModelPath}`;
 
   let result = transcriptionCache.get(cacheKey);
   if (!result) {
-    const modelData = fs.readFileSync(resolvedModelPath);
-    const pcm = decodeAudioToFloat32(resolvedInputPath);
+    const modelData = Buffer.from(await Bun.file(resolvedModelPath).arrayBuffer());
+    const pcm = await decodeAudioToFloat32(resolvedInputPath);
     const durationMs = Math.round((pcm.length / SAMPLE_RATE) * MILLISECONDS_PER_SECOND);
     const whisperFactory = loadWhisperFactory(options.whisperFactory, require, baseDirectory);
 

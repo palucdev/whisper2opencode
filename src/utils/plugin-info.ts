@@ -7,12 +7,19 @@ export const PLUGIN_ROOT = path.join(__dirname, '..'); // Points to dist/ where 
 
 const UNKNOWN_VERSION = 'unknown';
 
-export const readPluginVersion = (pluginRoot: string = PLUGIN_ROOT): string => {
+export const parsePluginVersion = (rawPackageJson: string): string => {
   try {
-    const packageJsonPath = path.join(pluginRoot, '..', 'package.json');
-    const raw = fs.readFileSync(packageJsonPath, 'utf8');
-    const version = (JSON.parse(raw) as { version?: unknown }).version;
+    const version = (JSON.parse(rawPackageJson) as { version?: unknown }).version;
     return typeof version === 'string' && version.length > 0 ? version : UNKNOWN_VERSION;
+  } catch {
+    return UNKNOWN_VERSION;
+  }
+};
+
+export const readPluginVersion = (): string => {
+  try {
+    const packageJsonPath = path.join(PLUGIN_ROOT, '..', 'package.json');
+    return parsePluginVersion(fs.readFileSync(packageJsonPath, 'utf8'));
   } catch {
     return UNKNOWN_VERSION;
   }

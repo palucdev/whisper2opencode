@@ -7,9 +7,15 @@ const EXPECTED_MOCK_FILE_COUNT = 2;
 const EXPECTED_SINGLE_FILE_COUNT = 1;
 
 describe('file-utility loadMarkdownDirectory: filesystem reading', () => {
-  test('returns empty array when directory does not exist', () => {
-    const result = loadMarkdownDirectory('nonexistent-dir');
-    expect(result).toEqual([]);
+  test('returns empty array when the directory cannot be read', () => {
+    const readdirSpy = spyOn(fs, 'readdirSync').mockImplementation((() => {
+      throw new Error('ENOENT: no such file or directory');
+    }) as unknown as typeof fs.readdirSync);
+    try {
+      expect(loadMarkdownDirectory('commands')).toEqual([]);
+    } finally {
+      readdirSpy.mockRestore();
+    }
   });
 
   test('parses real markdown files from agents directory', () => {
@@ -33,7 +39,7 @@ describe('file-utility loadMarkdownDirectory: mocked scenarios', () => {
     }) as unknown as typeof fs.readFileSync);
 
     try {
-      const results = loadMarkdownDirectory('any-dir');
+      const results = loadMarkdownDirectory('agents');
       expect(results).toHaveLength(EXPECTED_MOCK_FILE_COUNT);
       const names = results.map((element) => String(element.data.name)).toSorted((first, second) => first.localeCompare(second));
       expect(names).toEqual(['doc1', 'doc2']);
@@ -53,11 +59,11 @@ describe('file-utility loadMarkdownDirectory: mocked scenarios', () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
-      const results = loadMarkdownDirectory('any-dir');
+      const results = loadMarkdownDirectory('agents');
       expect(results).toHaveLength(EXPECTED_SINGLE_FILE_COUNT);
       expect(results[0]?.data.name).toBe('valid');
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[whisper2opencode] Skipping unparseable markdown file bad.md in any-dir:'),
+        expect.stringContaining('[whisper2opencode] Skipping unparseable markdown file bad.md in agents:'),
         expect.any(String),
       );
     } finally {

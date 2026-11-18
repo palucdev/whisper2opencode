@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
+import { accessSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import type { DownloadWhisperOptions, DownloadWhisperResult, InstallWhisperPackageOptions, SupportedPackageManager } from '../types/whisper-types.js';
+import { hasValidCachedModel, persistModelToCache } from './model-resolver.js';
 
 export { unpackTarballBuffer } from './tar-utility.js';
 import { unpackTarballBuffer } from './tar-utility.js';
@@ -16,12 +17,29 @@ export const HUGGINGFACE_MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whis
 
 const MODEL_ALIASES = new Map<string, string>([['large', 'ggml-large-v3.bin']]);
 
+const MODEL_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*\.bin$/;
+
+const doesPathExist = (targetPath: string): boolean => {
+  try {
+    accessSync(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // Normalizes user-specified model names into canonical GGML filenames (e.g. 'base.en' -> 'ggml-base.en.bin').
 export function resolveModelFileName(name?: string): string {
   const trimmed = name?.trim().toLowerCase();
   if (!trimmed) return 'ggml-base.en.bin';
-  if (trimmed.endsWith('.bin')) return trimmed.startsWith('ggml-') ? trimmed : `ggml-${trimmed}`;
-  return MODEL_ALIASES.get(trimmed) ?? `ggml-${trimmed}.bin`;
+  const withGgmlPrefix = trimmed.startsWith('ggml-') ? trimmed : `ggml-${trimmed}`;
+  const resolved = trimmed.endsWith('.bin') ? withGgmlPrefix : (MODEL_ALIASES.get(trimmed) ?? `ggml-${trimmed}.bin`);
+  if (!MODEL_FILE_NAME_PATTERN.test(resolved)) {
+    throw new Error(
+      `Invalid model name "${name}". Hint: Use a simple model name such as 'tiny.en', 'base.en', or 'small'; path separators and traversal sequences are not allowed.`,
+    );
+  }
+  return resolved;
 }
 
 const LOCKFILE_MANAGERS: readonly [string, SupportedPackageManager][] = [
@@ -40,7 +58,7 @@ export function detectPackageManager(targetDirectory: string): SupportedPackageM
 
   while (currentDirectory && currentDirectory !== root) {
     for (const [lockfile, manager] of LOCKFILE_MANAGERS) {
-      if (fs.existsSync(path.join(currentDirectory, lockfile))) {
+      if (doesPathExist(path.join(currentDirectory, lockfile))) {
         return manager;
       }
     }
@@ -55,7 +73,6 @@ export function detectPackageManager(targetDirectory: string): SupportedPackageM
 // and extracts it into <targetDirectory>/node_modules/whisper.cpp.
 export async function downloadPackageFromRegistry(targetDirectory: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const nodeModulesDirectory = path.join(targetDirectory, 'node_modules', NPM_PACKAGE_NAME);
-  fs.mkdirSync(nodeModulesDirectory, { recursive: true });
 
   let response: Response;
   try {
@@ -76,7 +93,7 @@ export async function downloadPackageFromRegistry(targetDirectory: string, fetch
   const compressedBuffer = Buffer.from(await response.arrayBuffer());
   const tarBuffer = zlib.gunzipSync(compressedBuffer);
 
-  unpackTarballBuffer(tarBuffer, nodeModulesDirectory);
+  await unpackTarballBuffer(tarBuffer, nodeModulesDirectory);
   return nodeModulesDirectory;
 }
 
@@ -112,7 +129,6 @@ export async function installWhisperPackage(
   const options = resolveInstallOptions(targetDirectoryOrOptions, restArguments);
   const { targetDirectory, packageManager } = options;
   const runner = options.processRunner ?? execFileSync;
-  fs.mkdirSync(targetDirectory, { recursive: true });
 
   const commandConfig = PM_COMMANDS.get(packageManager) ?? { command: 'npm', commandArguments: ['install', NPM_PACKAGE_NAME] };
 
@@ -158,11 +174,10 @@ export async function downloadGgmlModel(
   const cacheDirectory = path.join(os.homedir(), '.cache', 'whisper2opencode');
   const cachedModelPath = path.join(cacheDirectory, resolvedFileName);
 
-  if (fs.existsSync(cachedModelPath) && fs.statSync(cachedModelPath).size > 0) {
+  if (await hasValidCachedModel(cachedModelPath)) {
     return { modelPath: cachedModelPath, status: 'cached' };
   }
 
-  fs.mkdirSync(cacheDirectory, { recursive: true });
   const modelUrl = `${HUGGINGFACE_MODEL_BASE_URL}/${resolvedFileName}`;
 
   let response: Response;
@@ -184,10 +199,8 @@ export async function downloadGgmlModel(
     );
   }
 
-  const temporaryPath = `${cachedModelPath}.tmp-${process.pid}-${Date.now()}`;
   const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(temporaryPath, buffer);
-  fs.renameSync(temporaryPath, cachedModelPath);
+  await persistModelToCache(cachedModelPath, buffer);
 
   return { modelPath: cachedModelPath, status: 'downloaded' };
 }

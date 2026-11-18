@@ -1,7 +1,16 @@
-import fs from 'node:fs';
+import { accessSync } from 'node:fs';
 import path from 'node:path';
 import type { SaveTranscriptionOptions } from '../types/whisper-types.js';
 import { formatTranscriptionWithMetadata } from './transcription-formatter.js';
+
+const doesPathExist = (targetPath: string): boolean => {
+  try {
+    accessSync(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const validatePathSegments = (relativeToBase: string, candidatePath: string): void => {
   const segments = relativeToBase.split(/[/\\]/);
@@ -44,7 +53,7 @@ export const validateTranscriptionDestination = (baseDirectory: string, rawFileP
   validatePathSegments(relativeToBase, candidatePath);
   const resolvedOutputPath = resolveOutputTxtPath(candidatePath);
 
-  if (fs.existsSync(resolvedOutputPath)) {
+  if (doesPathExist(resolvedOutputPath)) {
     throw new Error(
       `Transcription file already exists: ${resolvedOutputPath}. Existing files cannot be modified or overwritten. Hint: Choose a new, non-existent '.txt' filename within the working directory.`,
     );
@@ -53,7 +62,7 @@ export const validateTranscriptionDestination = (baseDirectory: string, rawFileP
   return resolvedOutputPath;
 };
 
-export function saveTranscriptionFile(options: SaveTranscriptionOptions): string {
+export async function saveTranscriptionFile(options: SaveTranscriptionOptions): Promise<string> {
   const baseDirectory = path.resolve(options.directory ?? process.cwd());
   if (typeof options.content !== 'string' || !options.content.trim()) {
     throw new Error("Missing or empty 'content' argument. Hint: Provide the non-empty transcription text to save.");
@@ -66,11 +75,7 @@ export function saveTranscriptionFile(options: SaveTranscriptionOptions): string
     duration: options.duration,
   });
 
-  fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
-  fs.writeFileSync(resolvedOutputPath, formattedContent, {
-    encoding: 'utf8',
-    flag: 'wx',
-  });
+  await Bun.write(resolvedOutputPath, formattedContent);
 
   return resolvedOutputPath;
 }

@@ -2,12 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import matter from 'gray-matter';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { configureSkills } from '../../configuration/skills-config.js';
 import type { OpenCodeConfig } from '../../types/opencode-types.js';
-import { PLUGIN_ROOT } from '../../utils/plugin-info.js';
 
-const skillsDirectory = path.join(PLUGIN_ROOT, 'skills');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const skillsDirectory = path.join(__dirname, '..', '..', 'skills');
 
 describe('configureSkills', () => {
   test('adds the bundled skills directory once', () => {

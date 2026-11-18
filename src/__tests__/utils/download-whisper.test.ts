@@ -17,6 +17,8 @@ const TEST_HOME = path.join(TEST_ROOT, 'home');
 const TEST_PROJECT = path.join(TEST_ROOT, 'project');
 const EXPECTED_PACKAGE_PATH = path.join(TEST_PROJECT, 'node_modules', 'whisper.cpp');
 const EXPECTED_EXTRACTED_FILE = path.join(EXPECTED_PACKAGE_PATH, 'whisper.js');
+const CACHED_TINY_MODEL_PATH = path.join(TEST_HOME, '.cache', 'whisper2opencode', 'ggml-tiny.en.bin');
+const CACHED_TINY_MODEL_SIDECAR_PATH = `${CACHED_TINY_MODEL_PATH}.size`;
 
 const fetchModel = () =>
   Promise.resolve({
@@ -53,6 +55,13 @@ describe('resolveModelFileName', () => {
     expect(resolveModelFileName('large')).toBe('ggml-large-v3.bin');
     expect(resolveModelFileName('custom.bin')).toBe('ggml-custom.bin');
   });
+
+  test('rejects traversal and path separator names', () => {
+    expect(() => resolveModelFileName('../../etc/passwd.bin')).toThrow(/Invalid model name/);
+    expect(() => resolveModelFileName('../ggml-evil.bin')).toThrow(/Invalid model name/);
+    expect(() => resolveModelFileName('nested/model.bin')).toThrow(/Invalid model name/);
+    expect(() => resolveModelFileName('/opt/ggml-evil.bin')).toThrow(/Invalid model name/);
+  });
 });
 
 describe('detectPackageManager', () => {
@@ -70,7 +79,9 @@ describe('detectPackageManager', () => {
   });
 
   test('falls back to the runtime when no lockfile exists', () => {
-    const lockfileSpy: { mockRestore: () => void } = spyOn(fs, 'existsSync').mockReturnValue(false);
+    const lockfileSpy: { mockRestore: () => void } = spyOn(fs, 'accessSync').mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
     try {
       expect(['bun', 'npm']).toContain(detectPackageManager(TEST_PROJECT));
     } finally {
@@ -133,7 +144,9 @@ describe('downloadGgmlModel', () => {
     try {
       const firstResult = await downloadGgmlModel('tiny.en', fetchModel as unknown as typeof fetch);
       expect(firstResult.status).toBe('downloaded');
-      expect(fs.existsSync(firstResult.modelPath)).toBe(true);
+      expect(firstResult.modelPath).toBe(CACHED_TINY_MODEL_PATH);
+      expect(fs.existsSync(CACHED_TINY_MODEL_PATH)).toBe(true);
+      expect(fs.readFileSync(CACHED_TINY_MODEL_SIDECAR_PATH, 'utf8')).toBe(String(Buffer.byteLength('mock-model')));
 
       let isSecondFetchCalled = false;
       const secondResult = await downloadGgmlModel('tiny.en', (() => {
@@ -148,7 +161,44 @@ describe('downloadGgmlModel', () => {
       homedirSpy.mockRestore();
     }
   });
+});
 
+describe('downloadGgmlModel cache invalidation', () => {
+  test('re-downloads a cached model without a size sidecar', async () => {
+    const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
+    try {
+      fs.mkdirSync(path.dirname(CACHED_TINY_MODEL_PATH), { recursive: true });
+      fs.writeFileSync(CACHED_TINY_MODEL_PATH, 'stale-model');
+
+      const result = await downloadGgmlModel('tiny.en', fetchModel as unknown as typeof fetch);
+
+      expect(result.status).toBe('downloaded');
+      expect(fs.readFileSync(CACHED_TINY_MODEL_PATH, 'utf8')).toBe('mock-model');
+      expect(fs.readFileSync(CACHED_TINY_MODEL_SIDECAR_PATH, 'utf8')).toBe(String(Buffer.byteLength('mock-model')));
+    } finally {
+      homedirSpy.mockRestore();
+    }
+  });
+
+  test('re-downloads a cached model with a mismatched sidecar size', async () => {
+    const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
+    try {
+      fs.mkdirSync(path.dirname(CACHED_TINY_MODEL_PATH), { recursive: true });
+      fs.writeFileSync(CACHED_TINY_MODEL_PATH, 'stale-model');
+      fs.writeFileSync(CACHED_TINY_MODEL_SIDECAR_PATH, '1');
+
+      const result = await downloadGgmlModel('tiny.en', fetchModel as unknown as typeof fetch);
+
+      expect(result.status).toBe('downloaded');
+      expect(fs.readFileSync(CACHED_TINY_MODEL_PATH, 'utf8')).toBe('mock-model');
+      expect(fs.readFileSync(CACHED_TINY_MODEL_SIDECAR_PATH, 'utf8')).toBe(String(Buffer.byteLength('mock-model')));
+    } finally {
+      homedirSpy.mockRestore();
+    }
+  });
+});
+
+describe('downloadGgmlModel errors', () => {
   test('surfaces network and HTTP errors', async () => {
     const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
     try {

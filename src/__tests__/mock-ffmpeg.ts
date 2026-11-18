@@ -9,6 +9,22 @@ export type MockFfmpegConvertMode = 'success' | 'no-stream' | 'generic' | 'gener
 
 const MOCK_PCM_SAMPLE_COUNT = 16_000;
 
+const MOCK_OUTPUT_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'mock-ffmpeg');
+const PCM_TEMPLATE_PATH = path.join(MOCK_OUTPUT_ROOT, 'template.pcmf32');
+const WAV_TEMPLATE_PATH = path.join(MOCK_OUTPUT_ROOT, 'template.wav');
+const GENERIC_TEMPLATE_PATH = path.join(MOCK_OUTPUT_ROOT, 'template.bin');
+
+// ffmpeg conversions write deterministic content; templates are written once to static paths and copied per conversion.
+const writeMockTemplates = (): void => {
+  fs.mkdirSync(MOCK_OUTPUT_ROOT, { recursive: true });
+  const pcm = new Float32Array(MOCK_PCM_SAMPLE_COUNT);
+  fs.writeFileSync(PCM_TEMPLATE_PATH, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+  fs.writeFileSync(WAV_TEMPLATE_PATH, createMockWavBuffer(1, MOCK_PCM_SAMPLE_COUNT));
+  fs.writeFileSync(GENERIC_TEMPLATE_PATH, Buffer.from('mock-converted-media'));
+};
+
+writeMockTemplates();
+
 interface FfmpegExecError extends Error {
   stderr?: Buffer;
 }
@@ -54,18 +70,18 @@ const handleMockDecode = (inputPath: string | undefined): Buffer => {
   return Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
 };
 
-const writeConvertedOutput = (outputPath: string): void => {
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+const selectMockTemplatePath = (outputPath: string): string => {
   if (outputPath.endsWith('.pcmf32')) {
-    const pcm = new Float32Array(MOCK_PCM_SAMPLE_COUNT);
-    fs.writeFileSync(outputPath, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
-    return;
+    return PCM_TEMPLATE_PATH;
   }
   if (outputPath.endsWith('.wav')) {
-    fs.writeFileSync(outputPath, createMockWavBuffer(1, MOCK_PCM_SAMPLE_COUNT));
-    return;
+    return WAV_TEMPLATE_PATH;
   }
-  fs.writeFileSync(outputPath, Buffer.from('mock-converted-media'));
+  return GENERIC_TEMPLATE_PATH;
+};
+
+const writeConvertedOutput = (outputPath: string): void => {
+  fs.copyFileSync(selectMockTemplatePath(outputPath), outputPath);
 };
 
 const handleMockConvert = (inputPath: string | undefined, commandArguments: string[]): Buffer => {

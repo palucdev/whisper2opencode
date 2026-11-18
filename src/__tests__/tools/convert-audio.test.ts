@@ -22,6 +22,7 @@ afterEach(() => {
 
 describe('convert_audio tool', () => {
   test('converts media using tool arguments and the context directory', async () => {
+    const convertedPath = path.join(TEST_ROOT, 'converted.pcmf32');
     const outputPath = (await convert_audio.execute(
       {
         inputPath: MOCK_AUDIO_PATH,
@@ -34,8 +35,8 @@ describe('convert_audio tool', () => {
       createTestContext(TEST_ROOT),
     )) as string;
 
-    expect(outputPath).toBe(path.join(TEST_ROOT, 'converted.pcmf32'));
-    expect(fs.existsSync(outputPath)).toBe(true);
+    expect(outputPath).toBe(convertedPath);
+    expect(fs.existsSync(convertedPath)).toBe(true);
   });
 
   test('rejects missing input files', async () => {

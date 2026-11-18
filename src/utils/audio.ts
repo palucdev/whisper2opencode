@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
+import { accessSync, rmSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ConvertAudioOptions, ResolveMediaOptions, SupportedConvertFormat } from '../types/whisper-types.js';
@@ -41,10 +41,10 @@ const extractResolveOptions = (inputOrOptions: ResolveMediaOptions | string | un
   };
 };
 
-export function resolveMediaFile(
+export async function resolveMediaFile(
   inputOrOptions: ResolveMediaOptions | string | undefined,
   ...restArguments: unknown[]
-): { resolvedPath: string; stat: Stats } {
+): Promise<{ resolvedPath: string; stat: Stats }> {
   const { inputPath, baseDirectory, argumentName } = extractResolveOptions(inputOrOptions, restArguments);
   const label = argumentName === 'filePath' ? 'Audio/video file' : 'Source media file';
   if (!inputPath?.trim()) {
@@ -53,13 +53,16 @@ export function resolveMediaFile(
 
   const resolvedPath = path.isAbsolute(inputPath) ? inputPath : path.resolve(baseDirectory, inputPath);
 
-  if (!fs.existsSync(resolvedPath)) {
+  let stat: Stats;
+  try {
+    stat = await Bun.file(resolvedPath).stat();
+  } catch (error) {
     throw new Error(
       `${label} not found: ${resolvedPath}. Hint: Verify the file path using glob or list tools (resolved relative to "${baseDirectory}"), and pass an existing absolute path.`,
+      { cause: error },
     );
   }
 
-  const stat = fs.statSync(resolvedPath);
   validateMediaStat(stat, { label, resolvedPath });
 
   return { resolvedPath, stat };
@@ -71,8 +74,8 @@ function isSamePath(path1: string, path2: string): boolean {
   return process.platform === 'win32' ? normalizedPath1.toLowerCase() === normalizedPath2.toLowerCase() : normalizedPath1 === normalizedPath2;
 }
 
-const decodePcmf32File = (mediaPath: string): Float32Array => {
-  const raw = fs.readFileSync(mediaPath);
+const decodePcmf32File = async (mediaPath: string): Promise<Float32Array> => {
+  const raw = Buffer.from(await Bun.file(mediaPath).arrayBuffer());
   const sampleCount = Math.floor(raw.byteLength / FLOAT32_BYTES_PER_SAMPLE);
   const isAligned = raw.byteOffset % FLOAT32_BYTES_PER_SAMPLE === 0;
   const samples = isAligned
@@ -100,7 +103,7 @@ const bufferToFloat32Array = (pcmBuffer: Buffer, mediaPath: string): Float32Arra
   return samples;
 };
 
-export function decodeAudioToFloat32(mediaPath: string): Float32Array {
+export async function decodeAudioToFloat32(mediaPath: string): Promise<Float32Array> {
   if (mediaPath.toLowerCase().endsWith('.pcmf32')) {
     return decodePcmf32File(mediaPath);
   }
@@ -119,20 +122,41 @@ const resolveDestinationPath = (options: ConvertAudioOptions, context: { resolve
   return isSamePath(candidate, context.resolvedInputPath) ? path.join(parsed.dir, `${parsed.name}.converted.${targetFormat}`) : candidate;
 };
 
+const canAccess = (targetPath: string): boolean => {
+  try {
+    accessSync(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const validateOutputCollision = (resolvedOutputPath: string, options: { resolvedInputPath: string; isOverwrite: boolean }): void => {
   if (isSamePath(resolvedOutputPath, options.resolvedInputPath)) {
     throw new Error(
       `Output path "${resolvedOutputPath}" cannot be the same as input path. Hint: Provide a distinct 'outputPath' or omit 'outputPath' so a separate converted file is created.`,
     );
   }
-  if (!options.isOverwrite && fs.existsSync(resolvedOutputPath)) {
+  if (!options.isOverwrite && canAccess(resolvedOutputPath)) {
     throw new Error(`Output file already exists: ${resolvedOutputPath}. Hint: Set 'overwrite: true' or choose a different 'outputPath'.`);
   }
 };
 
-export function convertAudioFile(options: ConvertAudioOptions): string {
+const CONVERT_MARKER_FILE_NAME = '.w2oc-convert-marker';
+
+const prepareOutputDirectory = async (resolvedOutputPath: string): Promise<string | undefined> => {
+  const parentDirectory = path.dirname(resolvedOutputPath);
+  if (canAccess(parentDirectory)) {
+    return undefined;
+  }
+  const markerPath = path.join(parentDirectory, CONVERT_MARKER_FILE_NAME);
+  await Bun.write(markerPath, '');
+  return markerPath;
+};
+
+export async function convertAudioFile(options: ConvertAudioOptions): Promise<string> {
   const baseDirectory = options.directory ?? process.cwd();
-  const { resolvedPath: resolvedInputPath } = resolveMediaFile({
+  const { resolvedPath: resolvedInputPath } = await resolveMediaFile({
     inputPath: options.inputPath,
     baseDirectory,
     argumentName: 'inputPath',
@@ -143,7 +167,7 @@ export function convertAudioFile(options: ConvertAudioOptions): string {
 
   validateOutputCollision(resolvedOutputPath, { resolvedInputPath, isOverwrite });
 
-  fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
+  const markerPath = await prepareOutputDirectory(resolvedOutputPath);
 
   const ffmpegPath = getFfmpegBinary();
   const commandArguments = buildConvertArguments(options, { resolvedInputPath, resolvedOutputPath });
@@ -152,6 +176,10 @@ export function convertAudioFile(options: ConvertAudioOptions): string {
     execFileSync(ffmpegPath, commandArguments, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
     handleConvertError(error, { resolvedInputPath, targetFormat });
+  } finally {
+    if (markerPath) {
+      rmSync(markerPath, { force: true });
+    }
   }
 
   return resolvedOutputPath;
