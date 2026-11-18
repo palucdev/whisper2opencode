@@ -1,6 +1,6 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { SaveTranscriptionOptions } from '../types/whisper-types.js';
-import { fileSystem } from './file-system.js';
 import { formatTranscriptionWithMetadata } from './transcription-formatter.js';
 
 const validatePathSegments = (relativeToBase: string, candidatePath: string): void => {
@@ -44,7 +44,7 @@ export const validateTranscriptionDestination = (baseDirectory: string, rawFileP
   validatePathSegments(relativeToBase, candidatePath);
   const resolvedOutputPath = resolveOutputTxtPath(candidatePath);
 
-  if (fileSystem.existsSync(resolvedOutputPath)) {
+  if (fs.existsSync(resolvedOutputPath)) {
     throw new Error(
       `Transcription file already exists: ${resolvedOutputPath}. Existing files cannot be modified or overwritten. Hint: Choose a new, non-existent '.txt' filename within the working directory.`,
     );
@@ -66,8 +66,8 @@ export function saveTranscriptionFile(options: SaveTranscriptionOptions): string
     duration: options.duration,
   });
 
-  fileSystem.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
-  fileSystem.writeFileSync(resolvedOutputPath, formattedContent, {
+  fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
+  fs.writeFileSync(resolvedOutputPath, formattedContent, {
     encoding: 'utf8',
     flag: 'wx',
   });

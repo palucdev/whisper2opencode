@@ -6,7 +6,6 @@ import '../mock-ffmpeg.js';
 import { mockFfmpegState } from '../mock-ffmpeg.js';
 
 import { convert_audio } from '../../tools/convert-audio.js';
-import { fileSystem } from '../../utils/file-system.js';
 import { MOCK_AUDIO_PATH, createTestContext } from '../fixtures.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'tool-convert-audio');
@@ -36,7 +35,7 @@ describe('convert_audio tool', () => {
     )) as string;
 
     expect(outputPath).toBe(path.join(TEST_ROOT, 'converted.pcmf32'));
-    expect(fileSystem.existsSync(outputPath)).toBe(true);
+    expect(fs.existsSync(outputPath)).toBe(true);
   });
 
   test('rejects missing input files', async () => {

@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { save_transcription } from '../../tools/save-transcription.js';
-import { fileSystem } from '../../utils/file-system.js';
 import { createTestContext } from '../fixtures.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'tool-save-transcription');
@@ -31,6 +30,6 @@ describe('save_transcription tool', () => {
     )) as string;
 
     expect(savedPath).toBe(path.join(TEST_ROOT, 'notes.txt'));
-    expect(fileSystem.readFileSync(savedPath, 'utf8')).toBe('---\nsource_file: jfk.wav\nduration: 00:00:01.000 (1.00s)\n---\n\n' + BODY);
+    expect(fs.readFileSync(savedPath, 'utf8')).toBe('---\nsource_file: jfk.wav\nduration: 00:00:01.000 (1.00s)\n---\n\n' + BODY);
   });
 });

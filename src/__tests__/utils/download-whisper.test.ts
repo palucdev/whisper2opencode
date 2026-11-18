@@ -10,7 +10,6 @@ import {
   installWhisperPackage,
   resolveModelFileName,
 } from '../../utils/download-whisper.js';
-import { fileSystem } from '../../utils/file-system.js';
 import { createMinimalTarGz } from '../fixtures.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'download-whisper');
@@ -71,7 +70,7 @@ describe('detectPackageManager', () => {
   });
 
   test('falls back to the runtime when no lockfile exists', () => {
-    const lockfileSpy: { mockRestore: () => void } = spyOn(fileSystem, 'existsSync').mockReturnValue(false);
+    const lockfileSpy: { mockRestore: () => void } = spyOn(fs, 'existsSync').mockReturnValue(false);
     try {
       expect(['bun', 'npm']).toContain(detectPackageManager(TEST_PROJECT));
     } finally {
@@ -111,7 +110,7 @@ describe('installWhisperPackage', () => {
     });
 
     expect(result.method).toBe('registry');
-    expect(fileSystem.existsSync(EXPECTED_EXTRACTED_FILE)).toBe(true);
+    expect(fs.existsSync(EXPECTED_EXTRACTED_FILE)).toBe(true);
   });
 
   test('throws when both the CLI and registry download fail', async () => {
@@ -134,7 +133,7 @@ describe('downloadGgmlModel', () => {
     try {
       const firstResult = await downloadGgmlModel('tiny.en', fetchModel as unknown as typeof fetch);
       expect(firstResult.status).toBe('downloaded');
-      expect(fileSystem.existsSync(firstResult.modelPath)).toBe(true);
+      expect(fs.existsSync(firstResult.modelPath)).toBe(true);
 
       let isSecondFetchCalled = false;
       const secondResult = await downloadGgmlModel('tiny.en', (() => {

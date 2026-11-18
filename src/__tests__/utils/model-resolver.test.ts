@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { fileSystem } from '../../utils/file-system.js';
 import { DEFAULT_MODEL_NAME, resolveModelPath } from '../../utils/model-resolver.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'model-resolver');
@@ -43,7 +42,7 @@ afterEach(() => {
 describe('resolveModelPath custom models', () => {
   test('resolves explicit and environment-provided model paths', async () => {
     const modelFile = path.join(TEST_ROOT, 'custom.bin');
-    fileSystem.writeFileSync(modelFile, 'model');
+    fs.writeFileSync(modelFile, 'model');
 
     expect(await resolveModelPath(modelFile, TEST_ROOT)).toBe(modelFile);
 
@@ -59,7 +58,7 @@ describe('resolveModelPath custom models', () => {
     await expect(resolveModelPath(modelDirectory, TEST_ROOT)).rejects.toThrow(/is a directory/);
 
     const emptyModel = path.join(TEST_ROOT, 'empty.bin');
-    fileSystem.writeFileSync(emptyModel, '');
+    fs.writeFileSync(emptyModel, '');
     await expect(resolveModelPath(emptyModel, TEST_ROOT)).rejects.toThrow(/file is empty/);
   });
 });
@@ -69,7 +68,7 @@ describe('resolveModelPath default model', () => {
     const homedirSpy = spyOn(os, 'homedir').mockReturnValue(TEST_HOME);
     try {
       fs.mkdirSync(CACHE_DIRECTORY, { recursive: true });
-      fileSystem.writeFileSync(CACHED_MODEL_PATH, 'cached-model');
+      fs.writeFileSync(CACHED_MODEL_PATH, 'cached-model');
 
       expect(await resolveModelPath(undefined, TEST_ROOT)).toBe(CACHED_MODEL_PATH);
     } finally {
@@ -82,7 +81,7 @@ describe('resolveModelPath default model', () => {
     const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchModel as unknown as typeof fetch);
     try {
       expect(await resolveModelPath(undefined, TEST_ROOT)).toBe(CACHED_MODEL_PATH);
-      expect(fileSystem.existsSync(CACHED_MODEL_PATH)).toBe(true);
+      expect(fs.existsSync(CACHED_MODEL_PATH)).toBe(true);
     } finally {
       homedirSpy.mockRestore();
       fetchSpy.mockRestore();

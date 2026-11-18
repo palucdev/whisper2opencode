@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ConvertAudioOptions, ResolveMediaOptions, SupportedConvertFormat } from '../types/whisper-types.js';
 import { FLOAT32_BYTES_PER_SAMPLE, VIDEO_EXTENSIONS } from './audio-constants.js';
-import { fileSystem } from './file-system.js';
 import { buildConvertArguments, getFfmpegBinary, handleConvertError, runFfmpegDecode } from './ffmpeg-runner.js';
 
 export { DEFAULT_AUDIO_SAMPLE_RATE, SAMPLE_RATE } from './audio-constants.js';
@@ -53,13 +53,13 @@ export function resolveMediaFile(
 
   const resolvedPath = path.isAbsolute(inputPath) ? inputPath : path.resolve(baseDirectory, inputPath);
 
-  if (!fileSystem.existsSync(resolvedPath)) {
+  if (!fs.existsSync(resolvedPath)) {
     throw new Error(
       `${label} not found: ${resolvedPath}. Hint: Verify the file path using glob or list tools (resolved relative to "${baseDirectory}"), and pass an existing absolute path.`,
     );
   }
 
-  const stat = fileSystem.statSync(resolvedPath);
+  const stat = fs.statSync(resolvedPath);
   validateMediaStat(stat, { label, resolvedPath });
 
   return { resolvedPath, stat };
@@ -72,7 +72,7 @@ function isSamePath(path1: string, path2: string): boolean {
 }
 
 const decodePcmf32File = (mediaPath: string): Float32Array => {
-  const raw = fileSystem.readFileSync(mediaPath);
+  const raw = fs.readFileSync(mediaPath);
   const sampleCount = Math.floor(raw.byteLength / FLOAT32_BYTES_PER_SAMPLE);
   const isAligned = raw.byteOffset % FLOAT32_BYTES_PER_SAMPLE === 0;
   const samples = isAligned
@@ -125,7 +125,7 @@ const validateOutputCollision = (resolvedOutputPath: string, options: { resolved
       `Output path "${resolvedOutputPath}" cannot be the same as input path. Hint: Provide a distinct 'outputPath' or omit 'outputPath' so a separate converted file is created.`,
     );
   }
-  if (!options.isOverwrite && fileSystem.existsSync(resolvedOutputPath)) {
+  if (!options.isOverwrite && fs.existsSync(resolvedOutputPath)) {
     throw new Error(`Output file already exists: ${resolvedOutputPath}. Hint: Set 'overwrite: true' or choose a different 'outputPath'.`);
   }
 };
@@ -143,7 +143,7 @@ export function convertAudioFile(options: ConvertAudioOptions): string {
 
   validateOutputCollision(resolvedOutputPath, { resolvedInputPath, isOverwrite });
 
-  fileSystem.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
+  fs.mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
 
   const ffmpegPath = getFfmpegBinary();
   const commandArguments = buildConvertArguments(options, { resolvedInputPath, resolvedOutputPath });

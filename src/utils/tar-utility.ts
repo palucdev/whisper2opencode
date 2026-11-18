@@ -1,5 +1,5 @@
+import fs from 'node:fs';
 import path from 'node:path';
-import { fileSystem } from './file-system.js';
 
 export const TAR_BLOCK_SIZE = 512;
 export const TAR_FILENAME_LIMIT = 100;
@@ -45,8 +45,8 @@ export function unpackTarballBuffer(tarBuffer: Buffer, targetDirectory: string):
     if (rawName && (typeFlag === '0' || typeFlag === '\0')) {
       const relativePath = rawName.replace(/^package\//, '');
       const outFilePath = resolveMemberDestination(targetDirectory, relativePath);
-      fileSystem.mkdirSync(path.dirname(outFilePath), { recursive: true });
-      fileSystem.writeFileSync(outFilePath, tarBuffer.subarray(offset, offset + size));
+      fs.mkdirSync(path.dirname(outFilePath), { recursive: true });
+      fs.writeFileSync(outFilePath, tarBuffer.subarray(offset, offset + size));
     }
 
     const blockCount = Math.ceil(size / TAR_BLOCK_SIZE);

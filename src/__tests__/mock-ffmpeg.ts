@@ -1,8 +1,8 @@
 import { mock } from 'bun:test';
 import * as realCp from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createMockWavBuffer } from './fixtures.js';
-import { fileSystem } from '../utils/file-system.js';
 
 export type MockFfmpegDecodeMode = 'success' | 'no-stream' | 'invalid-format' | 'generic' | 'generic-no-stderr' | 'zero-samples';
 export type MockFfmpegConvertMode = 'success' | 'no-stream' | 'generic' | 'generic-no-stderr';
@@ -55,17 +55,17 @@ const handleMockDecode = (inputPath: string | undefined): Buffer => {
 };
 
 const writeConvertedOutput = (outputPath: string): void => {
-  fileSystem.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   if (outputPath.endsWith('.pcmf32')) {
     const pcm = new Float32Array(MOCK_PCM_SAMPLE_COUNT);
-    fileSystem.writeFileSync(outputPath, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+    fs.writeFileSync(outputPath, Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength));
     return;
   }
   if (outputPath.endsWith('.wav')) {
-    fileSystem.writeFileSync(outputPath, createMockWavBuffer(1, MOCK_PCM_SAMPLE_COUNT));
+    fs.writeFileSync(outputPath, createMockWavBuffer(1, MOCK_PCM_SAMPLE_COUNT));
     return;
   }
-  fileSystem.writeFileSync(outputPath, Buffer.from('mock-converted-media'));
+  fs.writeFileSync(outputPath, Buffer.from('mock-converted-media'));
 };
 
 const handleMockConvert = (inputPath: string | undefined, commandArguments: string[]): Buffer => {

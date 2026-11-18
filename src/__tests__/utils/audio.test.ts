@@ -6,7 +6,6 @@ import '../mock-ffmpeg.js';
 import { mockFfmpegState } from '../mock-ffmpeg.js';
 
 import { SAMPLE_RATE, convertAudioFile, decodeAudioToFloat32, getFileType, isVideoFile, resolveMediaFile } from '../../utils/audio.js';
-import { fileSystem } from '../../utils/file-system.js';
 import { FIXTURES_DIR, MOCK_AUDIO_PATH } from '../fixtures.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'audio');
@@ -43,7 +42,7 @@ describe('resolveMediaFile', () => {
     expect(() => resolveMediaFile(FIXTURES_DIR, FIXTURES_DIR, 'filePath')).toThrow(/directory/);
 
     const emptyMedia = scratchPath('empty.wav');
-    fileSystem.writeFileSync(emptyMedia, '');
+    fs.writeFileSync(emptyMedia, '');
     expect(() => resolveMediaFile(emptyMedia, TEST_ROOT, 'filePath')).toThrow(/empty \(0 bytes\)/);
   });
 });
@@ -56,17 +55,17 @@ describe('decodeAudioToFloat32', () => {
 
     const pcmData = new Float32Array(SAMPLE_RATE);
     const pcmFile = scratchPath('valid.pcmf32');
-    fileSystem.writeFileSync(pcmFile, Buffer.from(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength));
+    fs.writeFileSync(pcmFile, Buffer.from(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength));
     expect(decodeAudioToFloat32(pcmFile)).toHaveLength(SAMPLE_RATE);
   });
 
   test('rejects empty pcmf32 files and videos without an audio stream', () => {
     const emptyPcm = scratchPath('empty.pcmf32');
-    fileSystem.writeFileSync(emptyPcm, Buffer.alloc(INCOMPLETE_PCM_BYTES_COUNT));
+    fs.writeFileSync(emptyPcm, Buffer.alloc(INCOMPLETE_PCM_BYTES_COUNT));
     expect(() => decodeAudioToFloat32(emptyPcm)).toThrow(/0 samples/);
 
     const silentVideo = scratchPath('silent.mp4');
-    fileSystem.writeFileSync(silentVideo, 'mock-silent-video');
+    fs.writeFileSync(silentVideo, 'mock-silent-video');
     mockFfmpegState.filePathModes.set(silentVideo, 'no-stream');
     expect(() => decodeAudioToFloat32(silentVideo)).toThrow(/no audio stream found/);
   });
@@ -76,12 +75,12 @@ describe('convertAudioFile', () => {
   test('converts media and returns the output path', () => {
     const outputPath = scratchPath('converted.pcmf32');
     expect(convertAudioFile({ inputPath: MOCK_AUDIO_PATH, outputPath, format: 'pcmf32', overwrite: true })).toBe(outputPath);
-    expect(fileSystem.existsSync(outputPath)).toBe(true);
+    expect(fs.existsSync(outputPath)).toBe(true);
   });
 
   test('guards against overwriting outputs and input collisions', () => {
     const existingOutput = scratchPath('existing.wav');
-    fileSystem.writeFileSync(existingOutput, '');
+    fs.writeFileSync(existingOutput, '');
     expect(() => convertAudioFile({ inputPath: MOCK_AUDIO_PATH, outputPath: existingOutput, format: 'wav', overwrite: false })).toThrow(
       /already exists/,
     );

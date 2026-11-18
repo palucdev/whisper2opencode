@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { fileSystem } from '../../utils/file-system.js';
 import { saveTranscriptionFile } from '../../utils/transcription-saver.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'transcription-saver');
@@ -29,11 +28,11 @@ describe('saveTranscriptionFile', () => {
     });
 
     expect(savedPath).toBe(path.join(TEST_ROOT, 'transcripts', 'notes.txt'));
-    expect(fileSystem.readFileSync(savedPath, 'utf8')).toBe(`---\nsource_file: jfk.wav\nduration: ${DURATION}\n---\n\n${BODY}`);
+    expect(fs.readFileSync(savedPath, 'utf8')).toBe(`---\nsource_file: jfk.wav\nduration: ${DURATION}\n---\n\n${BODY}`);
   });
 
   test('rejects overwriting existing files and non-txt extensions', () => {
-    fileSystem.writeFileSync(path.join(TEST_ROOT, 'existing.txt'), 'existing');
+    fs.writeFileSync(path.join(TEST_ROOT, 'existing.txt'), 'existing');
     expect(() =>
       saveTranscriptionFile({ filePath: 'existing.txt', sourceFile: 'jfk.wav', duration: DURATION, content: BODY, directory: TEST_ROOT }),
     ).toThrow(/already exists/);

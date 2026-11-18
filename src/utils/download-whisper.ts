@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import type { DownloadWhisperOptions, DownloadWhisperResult, InstallWhisperPackageOptions, SupportedPackageManager } from '../types/whisper-types.js';
-import { fileSystem } from './file-system.js';
 
 export { unpackTarballBuffer } from './tar-utility.js';
 import { unpackTarballBuffer } from './tar-utility.js';
@@ -40,7 +40,7 @@ export function detectPackageManager(targetDirectory: string): SupportedPackageM
 
   while (currentDirectory && currentDirectory !== root) {
     for (const [lockfile, manager] of LOCKFILE_MANAGERS) {
-      if (fileSystem.existsSync(path.join(currentDirectory, lockfile))) {
+      if (fs.existsSync(path.join(currentDirectory, lockfile))) {
         return manager;
       }
     }
@@ -55,7 +55,7 @@ export function detectPackageManager(targetDirectory: string): SupportedPackageM
 // and extracts it into <targetDirectory>/node_modules/whisper.cpp.
 export async function downloadPackageFromRegistry(targetDirectory: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const nodeModulesDirectory = path.join(targetDirectory, 'node_modules', NPM_PACKAGE_NAME);
-  fileSystem.mkdirSync(nodeModulesDirectory, { recursive: true });
+  fs.mkdirSync(nodeModulesDirectory, { recursive: true });
 
   let response: Response;
   try {
@@ -112,7 +112,7 @@ export async function installWhisperPackage(
   const options = resolveInstallOptions(targetDirectoryOrOptions, restArguments);
   const { targetDirectory, packageManager } = options;
   const runner = options.processRunner ?? execFileSync;
-  fileSystem.mkdirSync(targetDirectory, { recursive: true });
+  fs.mkdirSync(targetDirectory, { recursive: true });
 
   const commandConfig = PM_COMMANDS.get(packageManager) ?? { command: 'npm', commandArguments: ['install', NPM_PACKAGE_NAME] };
 
@@ -158,11 +158,11 @@ export async function downloadGgmlModel(
   const cacheDirectory = path.join(os.homedir(), '.cache', 'whisper2opencode');
   const cachedModelPath = path.join(cacheDirectory, resolvedFileName);
 
-  if (fileSystem.existsSync(cachedModelPath) && fileSystem.statSync(cachedModelPath).size > 0) {
+  if (fs.existsSync(cachedModelPath) && fs.statSync(cachedModelPath).size > 0) {
     return { modelPath: cachedModelPath, status: 'cached' };
   }
 
-  fileSystem.mkdirSync(cacheDirectory, { recursive: true });
+  fs.mkdirSync(cacheDirectory, { recursive: true });
   const modelUrl = `${HUGGINGFACE_MODEL_BASE_URL}/${resolvedFileName}`;
 
   let response: Response;
@@ -186,8 +186,8 @@ export async function downloadGgmlModel(
 
   const temporaryPath = `${cachedModelPath}.tmp-${process.pid}-${Date.now()}`;
   const buffer = Buffer.from(await response.arrayBuffer());
-  fileSystem.writeFileSync(temporaryPath, buffer);
-  fileSystem.renameSync(temporaryPath, cachedModelPath);
+  fs.writeFileSync(temporaryPath, buffer);
+  fs.renameSync(temporaryPath, cachedModelPath);
 
   return { modelPath: cachedModelPath, status: 'downloaded' };
 }

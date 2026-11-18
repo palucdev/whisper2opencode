@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type {
@@ -9,7 +10,6 @@ import type {
   WhisperInstance,
 } from '../types/whisper-types.js';
 import { SAMPLE_RATE, decodeAudioToFloat32, getFileType, resolveMediaFile } from './audio.js';
-import { fileSystem } from './file-system.js';
 import { resolveModelPath } from './model-resolver.js';
 import { SEGMENT_REGEX, formatMsToTimestamp, formatWordLines, parseTimestampToMs } from './transcription-formatter.js';
 
@@ -182,7 +182,7 @@ export async function transcribeAudioFile(options: TranscribeOptions): Promise<s
 
   let result = transcriptionCache.get(cacheKey);
   if (!result) {
-    const modelData = fileSystem.readFileSync(resolvedModelPath);
+    const modelData = fs.readFileSync(resolvedModelPath);
     const pcm = decodeAudioToFloat32(resolvedInputPath);
     const durationMs = Math.round((pcm.length / SAMPLE_RATE) * MILLISECONDS_PER_SECOND);
     const whisperFactory = loadWhisperFactory(options.whisperFactory, require, baseDirectory);
