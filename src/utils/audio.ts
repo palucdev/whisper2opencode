@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { accessSync, mkdirSync } from 'node:fs';
+import { accessSync, rmSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ConvertAudioOptions, ResolveMediaOptions, SupportedConvertFormat } from '../types/whisper-types.js';
@@ -131,6 +131,16 @@ const canAccess = (targetPath: string): boolean => {
   }
 };
 
+const prepareOutputDirectory = async (resolvedOutputPath: string): Promise<string | undefined> => {
+  const parentDirectory = path.dirname(resolvedOutputPath);
+  if (canAccess(parentDirectory)) {
+    return undefined;
+  }
+  const markerPath = path.join(parentDirectory, '.w2oc-convert-marker');
+  await Bun.write(markerPath, '');
+  return markerPath;
+};
+
 const validateOutputWithinDirectory = (resolvedOutputPath: string, baseDirectory: string): void => {
   const relativeToBase = path.relative(baseDirectory, resolvedOutputPath);
   if (!relativeToBase || relativeToBase.startsWith('..') || path.isAbsolute(relativeToBase)) {
@@ -165,7 +175,7 @@ export async function convertAudioFile(options: ConvertAudioOptions): Promise<st
   validateOutputWithinDirectory(resolvedOutputPath, baseDirectory);
   validateOutputCollision(resolvedOutputPath, { resolvedInputPath, isOverwrite });
 
-  mkdirSync(path.dirname(resolvedOutputPath), { recursive: true });
+  const markerPath = await prepareOutputDirectory(resolvedOutputPath);
 
   const ffmpegPath = getFfmpegBinary();
   const commandArguments = buildConvertArguments(options, { resolvedInputPath, resolvedOutputPath });
@@ -174,6 +184,10 @@ export async function convertAudioFile(options: ConvertAudioOptions): Promise<st
     execFileSync(ffmpegPath, commandArguments, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
     handleConvertError(error, { resolvedInputPath, targetFormat });
+  } finally {
+    if (markerPath) {
+      rmSync(markerPath, { force: true });
+    }
   }
 
   return resolvedOutputPath;
