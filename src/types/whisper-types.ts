@@ -57,10 +57,7 @@ export type SaveTranscriptionOptions = {
   directory?: string;
 };
 
-export type SupportedPackageManager = 'bun' | 'npm' | 'pnpm' | 'yarn';
-
 export type DownloadWhisperOptions = {
-  packageManager?: SupportedPackageManager;
   modelName?: string;
   skipModel?: boolean;
   directory?: string;
@@ -68,7 +65,6 @@ export type DownloadWhisperOptions = {
 };
 
 export type DownloadWhisperResult = {
-  packageManager: SupportedPackageManager;
   directory: string;
   packageStatus: string;
   modelName?: string;
@@ -91,7 +87,6 @@ export interface LoadWhisperFactoryOptions {
 
 export interface InstallWhisperPackageOptions {
   targetDirectory: string;
-  packageManager: SupportedPackageManager;
   processRunner?: typeof execFileSync;
   fetchImpl?: typeof fetch;
 }

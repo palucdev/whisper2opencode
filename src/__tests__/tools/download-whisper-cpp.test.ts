@@ -14,7 +14,6 @@ const mockSetup = (capture: (options: DownloadWhisperOptions) => void) =>
     const resolvedOptions = options ?? {};
     capture(resolvedOptions);
     return Promise.resolve({
-      packageManager: resolvedOptions.packageManager ?? 'bun',
       directory: resolvedOptions.directory ?? '',
       packageStatus: 'installed',
       summary: 'Mock setup completed successfully.',
@@ -32,7 +31,6 @@ afterEach(() => {
 
 describe('download_whisper_cpp tool', () => {
   test('exposes setup arguments', () => {
-    expect(download_whisper_cpp.args.packageManager).toBeDefined();
     expect(download_whisper_cpp.args.modelName).toBeDefined();
     expect(download_whisper_cpp.args.skipModel).toBeDefined();
     expect(download_whisper_cpp.args.directory).toBeDefined();
@@ -45,13 +43,12 @@ describe('download_whisper_cpp tool', () => {
     try {
       const customDirectory = path.join(TEST_ROOT, 'custom-workspace');
       const output = await download_whisper_cpp.execute(
-        { packageManager: 'bun', modelName: 'tiny.en', skipModel: true, directory: customDirectory },
+        { modelName: 'tiny.en', skipModel: true, directory: customDirectory },
         createTestContext(TEST_ROOT),
       );
 
       expect(output).toBe('Mock setup completed successfully.');
       expect(capturedOptions).toMatchObject({
-        packageManager: 'bun',
         modelName: 'tiny.en',
         skipModel: true,
         directory: customDirectory,

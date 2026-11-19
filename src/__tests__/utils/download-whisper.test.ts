@@ -3,13 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
-  detectPackageManager,
-  downloadGgmlModel,
-  downloadWhisperSetup,
-  installWhisperPackage,
-  resolveModelFileName,
-} from '../../utils/download-whisper.js';
+import { downloadGgmlModel, downloadWhisperSetup, installWhisperPackage, resolveModelFileName } from '../../utils/download-whisper.js';
 import { createMinimalTarGz } from '../fixtures.js';
 
 const TEST_ROOT = path.join(process.cwd(), 'node_modules', '.test-scratch', 'download-whisper');
@@ -60,32 +54,6 @@ describe('resolveModelFileName', () => {
   });
 });
 
-describe('detectPackageManager', () => {
-  test('detects lockfiles in the project and parent directories', () => {
-    fs.writeFileSync(path.join(TEST_PROJECT, 'bun.lock'), '');
-    expect(detectPackageManager(TEST_PROJECT)).toBe('bun');
-
-    const nestedDirectory = path.join(TEST_PROJECT, 'src', 'components');
-    fs.mkdirSync(nestedDirectory, { recursive: true });
-    expect(detectPackageManager(nestedDirectory)).toBe('bun');
-
-    fs.rmSync(path.join(TEST_PROJECT, 'bun.lock'));
-    fs.writeFileSync(path.join(TEST_PROJECT, 'pnpm-lock.yaml'), '');
-    expect(detectPackageManager(TEST_PROJECT)).toBe('pnpm');
-  });
-
-  test('falls back to the runtime when no lockfile exists', () => {
-    const lockfileSpy: { mockRestore: () => void } = spyOn(fs, 'accessSync').mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
-    try {
-      expect(['bun', 'npm']).toContain(detectPackageManager(TEST_PROJECT));
-    } finally {
-      lockfileSpy.mockRestore();
-    }
-  });
-});
-
 describe('installWhisperPackage', () => {
   test('runs the package manager CLI and reports success', async () => {
     const executed: { command: string; commandArguments: string[]; cwd?: string }[] = [];
@@ -98,7 +66,6 @@ describe('installWhisperPackage', () => {
 
     const result = await installWhisperPackage({
       targetDirectory: TEST_PROJECT,
-      packageManager: 'bun',
       processRunner: runner as unknown as typeof import('node:child_process').execFileSync,
     });
 
@@ -109,9 +76,8 @@ describe('installWhisperPackage', () => {
   test('falls back to direct registry download when the CLI fails', async () => {
     const result = await installWhisperPackage({
       targetDirectory: TEST_PROJECT,
-      packageManager: 'npm',
       processRunner: (() => {
-        throw new Error('npm missing');
+        throw new Error('bun missing');
       }) as unknown as typeof import('node:child_process').execFileSync,
       fetchImpl: fetchTarball as unknown as typeof fetch,
     });
@@ -124,9 +90,8 @@ describe('installWhisperPackage', () => {
     await expect(
       installWhisperPackage({
         targetDirectory: TEST_PROJECT,
-        packageManager: 'npm',
         processRunner: (() => {
-          throw new Error('npm missing');
+          throw new Error('bun missing');
         }) as unknown as typeof import('node:child_process').execFileSync,
         fetchImpl: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch,
       }),
@@ -215,13 +180,11 @@ describe('downloadWhisperSetup', () => {
     try {
       const result = await downloadWhisperSetup({
         directory: TEST_PROJECT,
-        packageManager: 'bun',
         processRunner: (() => Buffer.alloc(0)) as unknown as typeof import('node:child_process').execFileSync,
         fetchImpl: fetchModel as unknown as typeof fetch,
       });
 
       expect(result).toMatchObject({
-        packageManager: 'bun',
         directory: TEST_PROJECT,
         modelName: 'ggml-base.en.bin',
         modelStatus: 'downloaded',
@@ -235,7 +198,6 @@ describe('downloadWhisperSetup', () => {
   test('skips the model download when requested', async () => {
     const result = await downloadWhisperSetup({
       directory: TEST_PROJECT,
-      packageManager: 'npm',
       skipModel: true,
       processRunner: (() => Buffer.alloc(0)) as unknown as typeof import('node:child_process').execFileSync,
     });
