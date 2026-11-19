@@ -1,0 +1,40 @@
+import { tool } from '@opencode-ai/plugin';
+import { saveTranscriptionFile } from '../utils/transcribe.js';
+
+export const save_transcription = tool({
+  description:
+    'Save a transcription text file (.txt) to the filesystem within the current working directory. Prepends a YAML frontmatter metadata header (--- source_file and duration ---) at the beginning of the file, clearly separated by a blank line from the sequence of timestamped words ([HH:MM:SS.mmm --> HH:MM:SS.mmm] word, one word per row) so transcript consumers can easily parse or strip it automatically. Only creates new .txt files inside the working directory; refuses to save if the target file already exists, and never modifies, overwrites, or deletes existing files or creates non-.txt files.',
+  args: {
+    filePath: tool.schema
+      .string()
+      .describe(
+        "Relative path within the working directory for the new transcription .txt file (e.g. 'jfk.txt' or 'transcripts/jfk.transcription.txt'). Automatically appends '.txt' if no extension is given.",
+      ),
+    sourceFile: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Name of the source audio or video file (e.g. 'jfk.wav' or 'interview.mp4') to write into the metadata header at the beginning of the transcript file.",
+      ),
+    duration: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "Duration of the source audio or video (e.g. '00:00:11.000 (11.00s)') to write into the metadata header at the beginning of the transcript file.",
+      ),
+    content: tool.schema
+      .string()
+      .describe(
+        'Non-empty sequence of timestamped words to save to the .txt file, with one "[HH:MM:SS.mmm --> HH:MM:SS.mmm] word" entry per row (as returned by the transcribe tool). May also include the leading --- metadata --- header block or raw transcribe header.',
+      ),
+  },
+  async execute(toolArguments, context) {
+    return saveTranscriptionFile({
+      filePath: toolArguments.filePath,
+      content: toolArguments.content,
+      sourceFile: toolArguments.sourceFile,
+      duration: toolArguments.duration,
+      directory: context.directory,
+    });
+  },
+});

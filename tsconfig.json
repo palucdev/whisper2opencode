@@ -1,22 +1,43 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    // Environment setup & latest features
+    "lib": [
+      "ESNext"
+    ],
+    "target": "ESNext",
     "module": "NodeNext",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "types": [
+      "bun",
+      "bun-types",
+      "node"
+    ],
+    // Bundler mode
     "moduleResolution": "NodeNext",
-    "types": ["node"],
-    "outDir": "./dist",
+    "verbatimModuleSyntax": true,
     "rootDir": "./src",
+    "outDir": "dist",
     "declaration": true,
+    // Best practices
     "strict": true,
-    "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false
   },
   "include": [
     "src/**/*"
   ],
-  "types": [
-    "bun",
-    "bun-types"
-  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/__tests__",
+    "**/*.test.ts"
+  ]
 }
